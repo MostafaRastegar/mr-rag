@@ -1,0 +1,19 @@
+services:
+  chromadb:
+    image: docker.arvancloud.ir/chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    network_mode: host
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  chroma_data:

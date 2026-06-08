@@ -1,0 +1,24 @@
+# Web framework
+fastapi==0.115.6
+uvicorn==0.34.0
+
+# LangChain
+langchain==0.3.14
+langchain-community==0.3.14
+langchain-chroma==0.2.4
+
+# Vector store
+chromadb==1.5.9
+
+# HTTP client
+httpx==0.28.1
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Validation
+pydantic==2.10.3
+pydantic-settings==2.7.0
+
+# Utilities
+python-multipart==0.0.19
