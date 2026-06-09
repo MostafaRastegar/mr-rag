@@ -5,7 +5,7 @@ This module provides a configured text splitter that chunks
 documents into smaller pieces for embedding and retrieval.
 """
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import settings
 

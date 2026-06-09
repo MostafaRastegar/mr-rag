@@ -1,25 +1,27 @@
 """
-LLM service abstraction for OpenRouter API.
-
-This module provides a clean interface for interacting with
-language models via OpenRouter's API. It follows the Single
-Responsibility Principle by only handling LLM chat completions.
+LLM service using LangChain's ChatOpenAI.
+Uses OpenRouter API via custom base_url.
 """
 
 from typing import List, Dict
 
-import httpx
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import settings
 
 
 class LLMService:
-    """Handles chat completions using OpenRouter API."""
+    """Handles chat completions using OpenRouter API via LangChain."""
 
     def __init__(self) -> None:
-        self.api_key = settings.openrouter_api_key
-        self.base_url = settings.openrouter_base_url
-        self.model = settings.llm_model
+        self._client = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openrouter_api_key,
+            base_url=settings.openrouter_base_url,
+            temperature=0.7,
+            max_completion_tokens=1024,
+        )
 
     def generate(
         self,
@@ -32,29 +34,31 @@ class LLMService:
 
         Args:
             messages: A list of message dicts with 'role' and 'content' keys.
-            temperature: Controls randomness (0.0 = deterministic, 1.0 = creative).
+            temperature: Controls randomness.
             max_tokens: Maximum tokens in the response.
 
         Returns:
             The generated text response.
-
-        Raises:
-            httpx.HTTPError: If the API request fails.
         """
-        response = httpx.post(
-            url=f"{self.base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            },
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+        # Convert dict messages to LangChain message objects
+        langchain_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                langchain_messages.append(SystemMessage(content=msg["content"]))
+            else:
+                langchain_messages.append(HumanMessage(content=msg["content"]))
+
+        # Apply temperature and max_tokens if they differ from defaults
+        if temperature != 0.7 or max_tokens != 1024:
+            client = ChatOpenAI(
+                model=settings.llm_model,
+                api_key=settings.openrouter_api_key,
+                base_url=settings.openrouter_base_url,
+                temperature=temperature,
+                max_completion_tokens=max_tokens,
+            )
+        else:
+            client = self._client
+
+        response = client.invoke(langchain_messages)
+        return response.content
