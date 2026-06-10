@@ -1,0 +1,110 @@
+"""
+FastAPI route handlers for the RAG API.
+
+Thin layer: each handler validates the request, calls the appropriate
+pipeline, and returns a serialized response. No business logic here.
+"""
+
+import logging
+
+from fastapi import APIRouter, HTTPException
+
+from app.api.schemas import (
+    ChatRequest,
+    ChatResponse,
+    HealthResponse,
+    IngestRequest,
+    IngestResponse,
+    SourceItem,
+)
+from app.core.exceptions import (
+    DocumentLoadError,
+    IngestionError,
+    RetrievalError,
+)
+from app.core.ports import VectorStorePort
+from app.pipeline.ingestion import IngestionPipeline
+from app.pipeline.rag import RAGPipeline
+
+logger = logging.getLogger(__name__)
+
+
+def create_router(
+    ingestion: IngestionPipeline,
+    rag: RAGPipeline,
+    vector_store: VectorStorePort,
+) -> APIRouter:
+    """
+    Factory function to create the API router with dependency injection.
+
+    Args:
+        ingestion: The ingestion pipeline instance.
+        rag: The RAG pipeline instance.
+
+    Returns:
+        A configured APIRouter with all endpoints.
+    """
+    router = APIRouter()
+
+    @router.get("/health", response_model=HealthResponse)
+    def health():
+        """Health check endpoint."""
+        try:
+            count = vector_store.count()
+        except Exception:
+            count = -1
+
+        return HealthResponse(
+            status="ok" if count >= 0 else "degraded",
+            vector_store_count=count,
+        )
+
+    @router.post("/ingest", response_model=IngestResponse)
+    def ingest(request: IngestRequest):
+        """
+        Ingest a JSON file into the vector store.
+        """
+        try:
+            chunks = ingestion.run(request.file_path)
+            return IngestResponse(
+                status="success",
+                chunks_ingested=chunks,
+            )
+        except (FileNotFoundError, DocumentLoadError) as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except IngestionError as e:
+            logger.exception("Ingestion failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Unexpected ingestion error")
+            raise HTTPException(status_code=500, detail=f"Ingestion failed: {e}")
+
+    @router.post("/chat", response_model=ChatResponse)
+    def chat(request: ChatRequest):
+        """
+        Ask a question and get an answer based on ingested documents.
+        """
+        if not request.question.strip():
+            raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+        try:
+            answer = rag.answer(request.question)
+            return ChatResponse(
+                answer=answer.text,
+                sources=[
+                    SourceItem(
+                        content=s.chunk.text[:200],
+                        metadata=s.chunk.metadata,
+                        score=s.score,
+                    )
+                    for s in answer.sources
+                ],
+            )
+        except RetrievalError as e:
+            logger.exception("Chat failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Unexpected chat error")
+            raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
+
+    return router
