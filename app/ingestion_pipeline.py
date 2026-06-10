@@ -1,12 +1,15 @@
 """
-Ingestion pipeline for the RAG system.
+Ingestion pipeline for the RAG system using LangChain.
 
 This module orchestrates the full ingestion workflow: load JSON,
-split into chunks, generate embeddings, and store in ChromaDB.
+split into chunks using LangChain's text splitter, and store in
+the LangChain Chroma vector store.
 """
 
 import logging
 from typing import List
+
+from langchain_core.documents import Document
 
 from app.config import settings
 from app.document_loader import DocumentLoader
@@ -33,7 +36,11 @@ class IngestionPipeline:
 
     def run(self, file_path: str) -> int:
         """
-        Ingest a JSON file: load, chunk, embed, and store.
+        Ingest a JSON file: load, chunk, and store.
+
+        Uses LangChain's Document objects throughout the pipeline.
+        When an embedding_function is configured on the vector store,
+        embeddings are generated automatically.
 
         Args:
             file_path: Path to the JSON file to ingest.
@@ -44,7 +51,7 @@ class IngestionPipeline:
         Raises:
             FileNotFoundError: If the file doesn't exist.
         """
-        # Step 1: Load raw documents
+        # Step 1: Load documents (returns LangChain Document objects)
         documents = self.loader.load(file_path)
         logger.info("Loaded %d documents from %s", len(documents), file_path)
 
@@ -52,36 +59,34 @@ class IngestionPipeline:
             logger.warning("No documents found in %s", file_path)
             return 0
 
-        # Step 2: Chunk documents
-        all_chunks: List[str] = []
-        all_metadatas: List[dict] = []
+        # Step 2: Split documents into chunks
+        chunks: List[Document] = self.text_splitter.split_documents(documents)
+        logger.info("Split into %d chunks", len(chunks))
 
-        for doc in documents:
-            chunks = self.text_splitter.split_text(doc["content"])
-            metadata = doc.get("metadata", {})
-
-            for chunk in chunks:
-                all_chunks.append(chunk)
-                all_metadatas.append(metadata)
-
-        logger.info("Split into %d chunks", len(all_chunks))
-
-        if not all_chunks:
+        if not chunks:
             logger.warning("No chunks generated")
             return 0
 
-        # Step 3: Generate embeddings
-        embeddings = self.embedding_service.embed_batch(all_chunks)
-        logger.info("Generated %d embeddings", len(embeddings))
+        # Step 3: Store in vector database
+        # Generate IDs for each chunk
+        ids = [f"doc_{i}" for i in range(len(chunks))]
 
-        # Step 4: Store in vector database
-        ids = [f"doc_{i}" for i in range(len(all_chunks))]
-        self.vector_store.add_documents(
-            ids=ids,
-            embeddings=embeddings,
-            documents=all_chunks,
-            metadatas=all_metadatas,
-        )
-        logger.info("Stored %d chunks in vector store", len(all_chunks))
+        # If the vector store has an embedding function, use add_documents
+        # which will auto-generate embeddings; otherwise embed manually
+        if self.vector_store.vector_store._embedding_function is not None:
+            self.vector_store._vector_store.add_documents(
+                documents=chunks, ids=ids
+            )
+        else:
+            texts = [doc.page_content for doc in chunks]
+            embeddings = self.embedding_service.embed_batch(texts)
+            self.vector_store.add_documents(
+                ids=ids,
+                documents=texts,
+                embeddings=embeddings,
+                metadatas=[doc.metadata for doc in chunks],
+            )
 
-        return len(all_chunks)
+        logger.info("Stored %d chunks in vector store", len(chunks))
+
+        return len(chunks)

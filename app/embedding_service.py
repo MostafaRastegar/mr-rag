@@ -1,25 +1,27 @@
 """
-Embedding service abstraction for OpenRouter API.
+Embedding service abstraction using custom OpenRouter Embeddings.
 
-This module provides a clean interface for generating text embeddings
-using OpenRouter's API. It follows the Single Responsibility Principle
-by only handling embedding operations.
+Uses OpenRouterEmbeddings (LangChain-compatible, httpx-based) to provide
+a clean interface for generating text embeddings via OpenRouter API.
 """
 
 from typing import List
 
-import httpx
+from langchain_core.embeddings import Embeddings
 
-from app.config import settings
+from app.openrouter_embeddings import OpenRouterEmbeddings
 
 
 class EmbeddingService:
     """Generates text embeddings using OpenRouter API."""
 
     def __init__(self) -> None:
-        self.api_key = settings.openrouter_api_key
-        self.base_url = settings.openrouter_base_url
-        self.model = settings.embedding_model
+        self._embeddings = OpenRouterEmbeddings()
+
+    @property
+    def embeddings(self) -> Embeddings:
+        """Return the underlying LangChain Embeddings instance."""
+        return self._embeddings
 
     def embed(self, text: str) -> List[float]:
         """
@@ -30,25 +32,8 @@ class EmbeddingService:
 
         Returns:
             A list of floats representing the embedding vector.
-
-        Raises:
-            httpx.HTTPError: If the API request fails.
         """
-        response = httpx.post(
-            url=f"{self.base_url}/embeddings",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "input": text,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["data"][0]["embedding"]
+        return self._embeddings.embed_query(text)
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         """
@@ -59,22 +44,5 @@ class EmbeddingService:
 
         Returns:
             A list of embedding vectors (each a list of floats).
-
-        Raises:
-            httpx.HTTPError: If the API request fails.
         """
-        response = httpx.post(
-            url=f"{self.base_url}/embeddings",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": self.model,
-                "input": texts,
-            },
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return [item["embedding"] for item in data["data"]]
+        return self._embeddings.embed_documents(texts)

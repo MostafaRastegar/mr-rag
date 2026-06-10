@@ -1,6 +1,6 @@
 services:
   chromadb:
-    image: docker.arvancloud.ir/chromadb/chroma:latest
+    image: cache.damavand.ir/docker/chromadb/chroma:latest
     ports:
       - "8000:8000"
     network_mode: host

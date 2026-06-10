@@ -1,27 +1,28 @@
 """
-LLM service using LangChain's ChatOpenAI.
-Uses OpenRouter API via custom base_url.
+LLM service using custom OpenRouter ChatModel.
+
+Uses OpenRouterChatModel (LangChain-compatible, httpx-based) to provide
+a clean interface for chat completions via OpenRouter API.
 """
 
 from typing import List, Dict
 
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.config import settings
+from app.openrouter_llm import OpenRouterChatModel
 
 
 class LLMService:
     """Handles chat completions using OpenRouter API via LangChain."""
 
     def __init__(self) -> None:
-        self._client = ChatOpenAI(
-            model=settings.llm_model,
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url,
-            temperature=0.7,
-            max_completion_tokens=1024,
-        )
+        self._client = OpenRouterChatModel()
+
+    @property
+    def client(self) -> BaseChatModel:
+        """Return the underlying LangChain ChatModel instance."""
+        return self._client
 
     def generate(
         self,
@@ -50,15 +51,12 @@ class LLMService:
 
         # Apply temperature and max_tokens if they differ from defaults
         if temperature != 0.7 or max_tokens != 1024:
-            client = ChatOpenAI(
-                model=settings.llm_model,
-                api_key=settings.openrouter_api_key,
-                base_url=settings.openrouter_base_url,
+            client = OpenRouterChatModel(
                 temperature=temperature,
-                max_completion_tokens=max_tokens,
+                max_tokens=max_tokens,
             )
         else:
             client = self._client
 
         response = client.invoke(langchain_messages)
-        return response.content
+        return str(response.content)

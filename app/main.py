@@ -14,7 +14,6 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.document_loader import DocumentLoader
-from app.text_splitter import create_text_splitter
 from app.embedding_service import EmbeddingService
 from app.llm_service import LLMService
 from app.vector_store import VectorStore
@@ -27,7 +26,11 @@ logger = logging.getLogger(__name__)
 # Initialize services
 embedding_service = EmbeddingService()
 llm_service = LLMService()
-vector_store = VectorStore()
+
+# Vector store with embedding function for automatic embedding generation
+vector_store = VectorStore(
+    embedding_function=embedding_service.embeddings,
+)
 document_loader = DocumentLoader()
 
 # Initialize pipelines
@@ -37,7 +40,6 @@ ingestion_pipeline = IngestionPipeline(
     vector_store=vector_store,
 )
 rag_pipeline = RAGPipeline(
-    embedding_service=embedding_service,
     llm_service=llm_service,
     vector_store=vector_store,
 )

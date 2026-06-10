@@ -2,20 +2,23 @@
 Document loader for JSON scraper output.
 
 This module reads JSON files produced by the web scraper and
-extracts text content from them.
+returns LangChain Document objects ready for text splitting
+and ingestion into the vector store.
 """
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
+
+from langchain_core.documents import Document
 
 
 class DocumentLoader:
     """Loads documents from JSON scraper output files."""
 
-    def load(self, file_path: str) -> List[Dict[str, Any]]:
+    def load(self, file_path: str) -> List[Document]:
         """
-        Load documents from a JSON file.
+        Load documents from a JSON file as LangChain Document objects.
 
         Expected JSON format: a list of objects, each with at
         least a 'content' or 'text' field. Additional fields
@@ -25,7 +28,7 @@ class DocumentLoader:
             file_path: Path to the JSON file.
 
         Returns:
-            A list of dicts with 'content' and 'metadata' keys.
+            A list of LangChain Document objects.
 
         Raises:
             FileNotFoundError: If the file doesn't exist.
@@ -41,13 +44,13 @@ class DocumentLoader:
         if isinstance(data, dict):
             data = [data]
 
-        documents = []
+        documents: List[Document] = []
         for item in data:
             content = item.get("content") or item.get("text") or ""
             if not content:
                 continue
 
             metadata = {k: v for k, v in item.items() if k not in ("content", "text")}
-            documents.append({"content": content, "metadata": metadata})
+            documents.append(Document(page_content=content, metadata=metadata))
 
         return documents
