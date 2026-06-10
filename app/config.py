@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     # Retrieval
     top_k: int = 5
 
+    # Cache
+    cache_type: str = "memory"  # "memory" or "sqlite"
+    cache_db_path: str = "data/cache.db"
+    cache_ttl_embedding: int = 3600  # 1 hour
+    cache_ttl_llm: int = 86400  # 24 hours
+    cache_maxsize: int = 10_000  # max in-memory items
+
+    # Semantic cache (for RAG Q&A — matches similar questions via embedding similarity)
+    cache_semantic_enabled: bool = True
+    cache_semantic_threshold: float = 0.92  # cosine similarity threshold (0.0-1.0)
+    cache_semantic_maxsize: int = 500  # max cached question-answer pairs in memory
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

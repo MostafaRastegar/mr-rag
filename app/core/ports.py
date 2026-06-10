@@ -77,6 +77,75 @@ class LLMPort(ABC):
         ...
 
 
+class CachePort(ABC):
+    """Port for caching LLM responses and embeddings."""
+
+    @abstractmethod
+    def lookup(self, prompt: str, llm_string: str) -> str | None:
+        """
+        Look up a cached response by prompt and LLM configuration.
+
+        Args:
+            prompt: The serialized prompt / input text.
+            llm_string: Serialized LLM configuration parameters.
+
+        Returns:
+            The cached text if found, otherwise None.
+        """
+        ...
+
+    @abstractmethod
+    def update(self, prompt: str, llm_string: str, value: str) -> None:
+        """
+        Store a response in the cache.
+
+        Args:
+            prompt: The serialized prompt / input text.
+            llm_string: Serialized LLM configuration parameters.
+            value: The response text to cache.
+        """
+        ...
+
+    @abstractmethod
+    def clear(self) -> None:
+        """Clear all cached entries."""
+        ...
+
+    # ------------------------------------------------------------------
+    # Semantic (embedding-based) cache
+    # ------------------------------------------------------------------
+
+    def lookup_semantic(self, embedding: List[float], threshold: float) -> str | None:
+        """
+        Look up a cached response by semantic similarity of the query embedding.
+
+        Default implementation returns None (no semantic caching).
+        Override in adapters that support semantic matching.
+
+        Args:
+            embedding: The query embedding vector.
+            threshold: Cosine similarity threshold (0.0-1.0).
+
+        Returns:
+            The cached answer text if a sufficiently similar query is found,
+            otherwise None.
+        """
+        return None
+
+    def update_semantic(self, embedding: List[float], value: str) -> None:
+        """
+        Store a response in the semantic cache keyed by its query embedding.
+
+        Default implementation is a no-op.
+        Override in adapters that support semantic matching.
+
+        Args:
+            embedding: The query embedding vector to use as the key.
+            value: The answer text to cache.
+        """
+        ...
+
+
 class DocumentLoaderPort(ABC):
     """Port for loading documents from an external source."""
 

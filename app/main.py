@@ -9,7 +9,14 @@ import logging
 
 from fastapi import FastAPI
 
+from app.config import settings
 from app.api.routes import create_router
+from app.core.ports import CachePort
+from app.infrastructure.cache import (
+    InMemoryCacheAdapter,
+    SemanticCacheAdapter,
+    SQLiteCacheAdapter,
+)
 from app.infrastructure.chroma_vector_store import ChromaVectorStore
 from app.infrastructure.document_loader import JsonDocumentLoader
 from app.infrastructure.openrouter_embedding import OpenRouterEmbedding
@@ -24,9 +31,34 @@ logging.basicConfig(level=logging.INFO)
 # Dependency Injection Wiring
 # ---------------------------------------------------------------------------
 
+# Cache adapters
+_cache_embedding: CachePort
+_cache_llm: CachePort
+_cache_rag: CachePort
+
+if settings.cache_type == "sqlite":
+    _cache_embedding = SQLiteCacheAdapter(ttl_seconds=settings.cache_ttl_embedding)
+    _cache_llm = SQLiteCacheAdapter(ttl_seconds=settings.cache_ttl_llm)
+    logging.getLogger(__name__).info("Using SQLite cache (persistent)")
+else:
+    _cache_embedding = InMemoryCacheAdapter(maxsize=settings.cache_maxsize)
+    _cache_llm = InMemoryCacheAdapter(maxsize=settings.cache_maxsize)
+    logging.getLogger(__name__).info("Using InMemory cache (ephemeral)")
+
+# RAG pipeline uses SemanticCacheAdapter (hybrid exact + semantic)
+_cache_rag = SemanticCacheAdapter(
+    maxsize=settings.cache_semantic_maxsize,
+    default_threshold=settings.cache_semantic_threshold,
+)
+logging.getLogger(__name__).info(
+    "Using Semantic cache for RAG (maxsize=%d, threshold=%.2f)",
+    settings.cache_semantic_maxsize,
+    settings.cache_semantic_threshold,
+)
+
 # Infrastructure adapters
-embedding = OpenRouterEmbedding()
-llm = OpenRouterLLM()
+embedding = OpenRouterEmbedding(cache=_cache_embedding)
+llm = OpenRouterLLM(cache=_cache_llm)
 vector_store = ChromaVectorStore()
 document_loader = JsonDocumentLoader()
 text_splitter = LangChainTextSplitter()
@@ -42,6 +74,7 @@ rag_pipeline = RAGPipeline(
     embedding=embedding,
     llm=llm,
     vector_store=vector_store,
+    cache=_cache_rag,
 )
 
 # ---------------------------------------------------------------------------

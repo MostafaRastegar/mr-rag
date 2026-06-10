@@ -3,17 +3,20 @@ OpenRouter LLM Adapter.
 
 Implements the LLMPort interface using httpx to call
 the OpenRouter chat completions API directly, without LangChain dependency.
+Supports optional caching via CachePort for repeated requests.
 """
 
+import hashlib
+import json
 import logging
-from typing import List
+from typing import List, Optional
 
 import httpx
 
 from app.config import settings
 from app.core.domain import Message
 from app.core.exceptions import LLMError
-from app.core.ports import LLMPort
+from app.core.ports import CachePort, LLMPort
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,11 @@ class OpenRouterLLM(LLMPort):
 
     Uses httpx directly to avoid incompatibility issues between
     the openai library and OpenRouter's API.
+
+    If a CachePort instance is provided, responses are cached
+    using a hash of (serialized messages + model + temperature + max_tokens)
+    as the cache key. On subsequent identical requests, the cached
+    response is returned immediately without an API call.
     """
 
     def __init__(
@@ -33,12 +41,43 @@ class OpenRouterLLM(LLMPort):
         base_url: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 1024,
+        cache: CachePort | None = None,
     ) -> None:
         self.model = model or settings.llm_model
         self.api_key = api_key or settings.openrouter_api_key
         self.base_url = base_url or settings.openrouter_base_url
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self._cache = cache
+
+    def _serialize_messages(self, messages: List[Message]) -> str:
+        """Serialize messages to a JSON string for cache key generation."""
+        return json.dumps(
+            [{"role": m.role, "content": m.content} for m in messages],
+            sort_keys=True,
+        )
+
+    def _build_cache_key(
+        self, messages: List[Message], temperature: float, max_tokens: int
+    ) -> tuple[str, str]:
+        """
+        Build (prompt, llm_string) tuple for cache lookup.
+
+        Returns:
+            A tuple of (prompt, llm_string) where:
+            - prompt is the serialized messages
+            - llm_string is the serialized model configuration
+        """
+        prompt = self._serialize_messages(messages)
+        llm_config = json.dumps(
+            {
+                "model": self.model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+            sort_keys=True,
+        )
+        return prompt, llm_config
 
     def generate(
         self,
@@ -48,7 +87,22 @@ class OpenRouterLLM(LLMPort):
     ) -> str:
         """
         Generate a response from the language model.
+
+        If a cache is configured, checks the cache first before
+        calling the API. On cache hit, returns immediately.
+        On cache miss, calls the API, stores the result, and returns it.
         """
+        # Try cache first
+        if self._cache is not None:
+            prompt, llm_string = self._build_cache_key(
+                messages, temperature, max_tokens
+            )
+            cached = self._cache.lookup(prompt, llm_string)
+            if cached is not None:
+                logger.info("LLM cache HIT — returning cached response")
+                return cached
+
+        # No cache hit, call the API
         payload = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
@@ -68,7 +122,7 @@ class OpenRouterLLM(LLMPort):
             )
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            result = data["choices"][0]["message"]["content"]
         except httpx.HTTPStatusError as e:
             logger.error(
                 "OpenRouter LLM API error: %s - %s",
@@ -81,3 +135,13 @@ class OpenRouterLLM(LLMPort):
         except httpx.RequestError as e:
             logger.error("OpenRouter LLM request failed: %s", str(e))
             raise LLMError(f"LLM request failed: {e}") from e
+
+        # Store in cache
+        if self._cache is not None:
+            prompt, llm_string = self._build_cache_key(
+                messages, temperature, max_tokens
+            )
+            self._cache.update(prompt, llm_string, result)
+            logger.info("LLM cache UPDATED")
+
+        return result
