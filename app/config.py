@@ -28,11 +28,14 @@ class Settings(BaseSettings):
     app_port: int = 8080
 
     # Chunking
-    chunk_size: int = 1024
-    chunk_overlap: int = 200
+    chunk_size: int = 512
+    chunk_overlap: int = 100
 
     # Retrieval
-    top_k: int = 5
+    top_k: int = 3
+    retrieval_min_score: float = (
+        0.25  # minimum cosine score to include a chunk in context
+    )
 
     # Cache
     cache_type: str = "memory"  # "memory" or "sqlite"

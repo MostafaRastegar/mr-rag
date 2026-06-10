@@ -139,6 +139,24 @@ class RAGPipeline:
                 )
             return answer
 
+        # Filter out low-relevance chunks to save tokens
+        min_score = settings.retrieval_min_score
+        if min_score > 0:
+            filtered = [r for r in results if r.score >= min_score]
+            if filtered:
+                logger.info(
+                    "Filtered %d/%d low-scoring chunks (min_score=%.2f)",
+                    len(results) - len(filtered),
+                    len(results),
+                    min_score,
+                )
+                results = filtered
+            else:
+                logger.warning(
+                    "All chunks below min_score=%.2f, keeping the best one", min_score
+                )
+                results = results[:1]
+
         logger.info("Retrieved %d relevant chunks", len(results))
 
         # Step 3: Build context from retrieved documents
@@ -247,6 +265,24 @@ class RAGPipeline:
             )
             yield no_answer
             return
+
+        # Filter out low-relevance chunks to save tokens
+        min_score = settings.retrieval_min_score
+        if min_score > 0:
+            filtered = [r for r in results if r.score >= min_score]
+            if filtered:
+                logger.info(
+                    "Filtered %d/%d low-scoring chunks (min_score=%.2f)",
+                    len(results) - len(filtered),
+                    len(results),
+                    min_score,
+                )
+                results = filtered
+            else:
+                logger.warning(
+                    "All chunks below min_score=%.2f, keeping the best one", min_score
+                )
+                results = results[:1]
 
         logger.info("Retrieved %d relevant chunks", len(results))
 
