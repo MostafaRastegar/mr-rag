@@ -10,7 +10,7 @@ Supports optional full Q&A caching via CachePort.
 import hashlib
 import json
 import logging
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional
 
 from app.config import settings
 from app.core.domain import Answer, Message, SearchResult
@@ -174,6 +174,115 @@ class RAGPipeline:
             logger.info("RAG cache UPDATED")
 
         return answer
+
+    async def answer_stream(self, question: str) -> AsyncGenerator[str, None]:
+        """
+        Answer a question using RAG with streaming response.
+
+        Same two-layer cache strategy as `answer()`, but instead of waiting
+        for the full LLM response, yields tokens progressively as they arrive
+        from the OpenRouter SSE stream.
+
+        On cache hit (exact or semantic), yields the full cached answer as a
+        single token and returns immediately.
+
+        Args:
+            question: The user's question.
+
+        Yields:
+            Tokens of the generated answer as they become available.
+        """
+        logger.info("Processing streaming question: %s", question[:100])
+
+        # Layer 1: Try exact-match cache first
+        if self._cache is not None:
+            llm_string = json.dumps(
+                {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
+            )
+            cached = self._cache.lookup(question, llm_string)
+            if cached is not None:
+                logger.info("RAG streaming cache (exact) HIT")
+                try:
+                    data = json.loads(cached)
+                    yield data["text"]
+                    return
+                except (json.JSONDecodeError, KeyError):
+                    logger.warning("Cache entry malformed, re-running pipeline")
+
+        # Step 1: Embed the question
+        try:
+            query_embedding = self._embedding.embed_query(question)
+        except Exception as e:
+            logger.error("Failed to embed query: %s", str(e))
+            raise RetrievalError(f"Failed to embed query: {e}") from e
+
+        # Layer 2: Try semantic cache
+        if self._cache is not None and settings.cache_semantic_enabled:
+            cached = self._cache.lookup_semantic(
+                query_embedding, settings.cache_semantic_threshold
+            )
+            if cached is not None:
+                logger.info("RAG streaming cache (semantic) HIT")
+                try:
+                    data = json.loads(cached)
+                    yield data["text"]
+                    return
+                except (json.JSONDecodeError, KeyError):
+                    logger.warning("Semantic cache entry malformed, re-running")
+
+        # Step 2: Retrieve relevant documents
+        try:
+            results: List[SearchResult] = self._vector_store.search(
+                query_embedding=query_embedding,
+                top_k=settings.top_k,
+            )
+        except Exception as e:
+            logger.error("Vector store search failed: %s", str(e))
+            raise RetrievalError(f"Failed to search vector store: {e}") from e
+
+        if not results:
+            logger.warning("No relevant documents found for question")
+            no_answer = (
+                "I couldn't find any relevant information to answer your question."
+            )
+            yield no_answer
+            return
+
+        logger.info("Retrieved %d relevant chunks", len(results))
+
+        # Step 3: Build context from retrieved documents
+        context = self._build_context(results)
+
+        # Step 4: Stream answer from LLM
+        messages = [
+            Message(role="system", content=SYSTEM_PROMPT),
+            Message(
+                role="user",
+                content=f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer based only on the context above:",
+            ),
+        ]
+
+        answer_parts: List[str] = []
+        try:
+            async for token in self._llm.generate_stream(messages):
+                answer_parts.append(token)
+                yield token
+        except Exception as e:
+            logger.error("LLM streaming failed: %s", str(e))
+            raise RetrievalError(f"Failed to generate answer: {e}") from e
+
+        # Store full answer in cache
+        full_answer = "".join(answer_parts)
+        if self._cache is not None and full_answer:
+            llm_string = json.dumps(
+                {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
+            )
+            self._cache.update(question, llm_string, json.dumps({"text": full_answer}))
+            if settings.cache_semantic_enabled:
+                self._cache.update_semantic(
+                    query_embedding, json.dumps({"text": full_answer})
+                )
+            logger.info("RAG streaming cache UPDATED")
 
     def _build_context(self, results: List[SearchResult]) -> str:
         """Build a context string from retrieved search results."""

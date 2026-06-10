@@ -7,7 +7,7 @@ on these abstractions, not on concrete implementations.
 """
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import AsyncGenerator, List
 
 from app.core.domain import Chunk, Document, Message, SearchResult
 
@@ -64,7 +64,7 @@ class LLMPort(ABC):
         max_tokens: int = 1024,
     ) -> str:
         """
-        Generate a response from the language model.
+        Generate a response from the language model (blocking).
 
         Args:
             messages: Conversation messages.
@@ -75,6 +75,32 @@ class LLMPort(ABC):
             The generated text.
         """
         ...
+
+    @abstractmethod
+    async def generate_stream(
+        self,
+        messages: List[Message],
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Generate a streaming response from the language model.
+
+        Yields tokens one by one as they arrive from the API.
+        Uses SSE (Server-Sent Events) for real-time token delivery.
+
+        Args:
+            messages: Conversation messages.
+            temperature: Controls randomness (0.0 to 1.0).
+            max_tokens: Maximum tokens in the response.
+
+        Yields:
+            Tokens of the generated text as they arrive.
+        """
+        ...
+        # Default implementation: yield nothing
+        # Subclasses should override with actual streaming logic
+        yield ""
 
 
 class CachePort(ABC):
