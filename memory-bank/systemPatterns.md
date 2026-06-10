@@ -2,82 +2,111 @@
 
 ## Architecture: Hexagonal (Ports & Adapters)
 
-The project follows a strict hexagonal architecture with clean separation between domain, application, and infrastructure layers.
+The project follows a strict hexagonal architecture with clean separation between domain, application, infrastructure, and scheduler layers.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   FastAPI Layer                      │
-│  app/main.py  →  app/api/routes.py  →  schemas.py   │
-└──────────────────────┬──────────────────────────────┘
-                        │ depends on
-┌──────────────────────▼──────────────────────────────┐
-│                 Pipeline Layer                       │
-│  app/pipeline/ingestion.py                          │
-│  app/pipeline/rag.py                                │
-│  (depends ONLY on abstract ports)                   │
-└──────────────────────┬──────────────────────────────┘
-                        │ implements
-┌──────────────────────▼──────────────────────────────┐
-│              Infrastructure Layer                    │
-│  openrouter_embedding.py  (implements EmbeddingPort) │
-│  openrouter_llm.py        (implements LLMPort)      │
-│  chroma_vector_store.py   (implements VectorStorePort)│
-│  document_loader.py      (implements DocLoaderPort) │
-│  text_splitter.py        (implements TextSplitterPort)│
-│  cache.py                (implements CachePort)     │
-└──────────────────────┬──────────────────────────────┘
-                        │ defined in
-┌──────────────────────▼──────────────────────────────┐
-│                 Core Layer                           │
-│  domain.py      — Pure data classes (Document,       │
-│                    Chunk, SearchResult, Answer,       │
-│                    Message)                          │
-│  ports.py       — Abstract interfaces (Ports)        │
-│                    including CachePort               │
-│  exceptions.py  — Custom exception hierarchy         │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      API Layer                                │
+│  app/main.py  →  app/api/routes.py  →  schemas.py            │
+│  Endpoints: /health, /ingest, /chat, /chat/stream             │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ depends on
+┌───────────────────────────▼──────────────────────────────────┐
+│                    Pipeline Layer                              │
+│  app/pipeline/ingestion.py  — load → split → embed → store   │
+│  app/pipeline/rag.py        — embed → search → generate      │
+│  (depends ONLY on abstract ports)                             │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ implements
+┌───────────────────────────▼──────────────────────────────────┐
+│                 Infrastructure Layer                          │
+│  openrouter_embedding.py  (implements EmbeddingPort)          │
+│  openrouter_llm.py        (implements LLMPort + streaming)   │
+│  chroma_vector_store.py   (implements VectorStorePort)        │
+│  document_loader.py       (implements DocLoaderPort)          │
+│  text_splitter.py         (implements TextSplitterPort)       │
+│  cache.py                 (implements CachePort)              │
+└───────────────────────────┬──────────────────────────────────┘
+                            │ defined in
+┌───────────────────────────▼──────────────────────────────────┐
+│                      Core Layer                               │
+│  domain.py      — Data classes (Document, Chunk, SearchResult│
+│                   Answer, Message)                            │
+│  ports.py       — Abstract interfaces (6 Ports)              │
+│  exceptions.py  — Custom exception hierarchy                 │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                  Scheduler Layer (Standalone)                  │
+│  app/scheduler/config.py   — Scheduler settings              │
+│  app/scheduler/auth.py     — JWT authentication               │
+│  app/scheduler/client.py   — Scraper API client               │
+│  app/scheduler/job.py      — fetch → ingest → cleanup        │
+│  app/scheduler/logger.py   — Last fetch log                   │
+│  app/scheduler/runner.py   — Cron loop with schedule library  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Architecture Decisions
 
-### 1. Direct HTTP calls instead of LangChain's LLM/Embedding wrappers
-- OpenRouter's API is incompatible with some LangChain abstractions
-- Using `httpx` directly for API calls to embedding and LLM endpoints
-- More control over request/response handling
-- Simpler error handling and logging
+### 1. Direct HTTP for LLM/Embedding (no LangChain wrappers)
+- OpenRouter API incompatible with some LangChain abstractions
+- Using `httpx` directly for embedding and LLM endpoints
+- Full control over request/response handling
 
-### 2. LangChain used ONLY for text splitting and cache infrastructure
-- `RecursiveCharacterTextSplitter` provides robust chunking
-- Results are converted to domain `Chunk` objects to avoid LangChain coupling
-- `InMemoryCache` from `langchain_core.caches` used via `InMemoryCacheAdapter` wrapper
-- Cache adapters provide clean domain port interface while leveraging LangChain internals
+### 2. LangChain used for text splitting and cache
+- `RecursiveCharacterTextSplitter` for robust chunking
+- `InMemoryCache` from `langchain_core.caches` via `InMemoryCacheAdapter`
+- All results converted to domain objects to avoid coupling
 
-### 3. Manual Dependency Injection (no DI framework)
-- Dependencies are wired explicitly in `app/main.py`
-- Routes are created via a factory function `create_router()`
-- Each pipeline receives its dependencies through constructor injection
-- Keeps the dependency graph explicit and easy to trace
+### 3. Manual Dependency Injection
+- Dependencies wired explicitly in `app/main.py`
+- Each pipeline receives dependencies through constructor injection
+- No DI framework — keeps the graph explicit and traceable
 
-### 4. ChromaDB via langchain-chroma
-- `langchain-chroma` provides a robust ChromaDB client
-- Accessed at the collection level through `_collection` property
-- Avoids LangChain's `Document` coupling by working with raw collections
+### 4. Three-Tier Caching Architecture
+```
+Layer 1: Embedding Cache (TTL: 1h)
+         — Caches query → embedding vector results
 
-### 5. Three-tier caching architecture
-- **Embedding cache**: caches individual query → embedding vector results (TTL: 1h)
-- **LLM cache**: caches messages → LLM response results (TTL: 24h)
-- **RAG cache**: caches full question → answer results, skipping entire pipeline (TTL: 24h)
-- In-memory (ephemeral) or SQLite (persistent) backends, configurable via `cache_type`
+Layer 2: LLM Cache (TTL: 24h)
+         — Caches messages → LLM response
 
-## SOLID Principles Applied
+Layer 3: RAG Q&A Cache (two sub-layers):
+  a) Exact-match (SHA-256 hash)
+     — Identical questions return instantly
+  b) Semantic (cosine similarity ≥ 0.92)
+     — Similar questions matched via embedding similarity
+```
+
+### 5. Streaming Support
+- `POST /chat/stream` endpoint with SSE (Server-Sent Events)
+- Uses `httpx.AsyncClient.stream()` for real-time token delivery
+- First token displayed in ~3-5 seconds
+- Cache still works on streaming responses
+
+### 6. Token Reduction Strategy
+- `chunk_size`: 1024 → 512 (smaller chunks)
+- `top_k`: 5 → 3 (fewer chunks sent to LLM)
+- `retrieval_min_score`: 0.25 (filter low-relevance chunks)
+- Result: ~70% reduction in LLM token consumption
+
+### 7. Scheduler Cron Job
+- Uses `schedule` library (lightweight, no system cron needed)
+- JWT authentication with auto-refresh
+- Paginated data fetching from Scraper API
+- Exponential backoff retry (60s, 120s, 240s, ...)
+- Temp file lifecycle: save → ingest → cleanup
+
+## SOLID Principles
 
 | Principle | Implementation |
 |-----------|---------------|
-| **S** (Single Responsibility) | Each class has exactly one job: `OpenRouterEmbedding` only embeds, `JsonDocumentLoader` only loads, `InMemoryCacheAdapter` only caches, etc. |
-| **O** (Open/Closed) | New LLM/embedding/cache providers can be added by implementing the existing port interfaces |
-| **L** (Liskov Substitution) | All adapters implement their port interface consistently; pipelines work with any implementation |
-| **I** (Interface Segregation) | Six small focused ports: `EmbeddingPort`, `LLMPort`, `VectorStorePort`, `DocumentLoaderPort`, `TextSplitterPort`, `CachePort` |
-| **D** (Dependency Inversion) | High-level pipelines depend on abstract ports, not concrete implementations |
+| **S** (Single Responsibility) | Each class has exactly one job |
+| **O** (Open/Closed) | New providers added by implementing port interfaces |
+| **L** (Liskov Substitution) | All adapters implement their port interface |
+| **I** (Interface Segregation) | 6 small focused ports |
+| **D** (Dependency Inversion) | Pipelines depend on abstract ports |
 
 ## Data Flow
 
@@ -93,25 +122,37 @@ JSON File → JsonDocumentLoader.load()
          → int (count)
 ```
 
-### Chat/RAG Flow (with caching)
+### RAG Flow (with caching)
 ```
-Question (str)
-→ [Cache Check] → HIT → return cached Answer immediately
+Question
+→ [Exact Cache Check] → HIT → return cached Answer
 → MISS:
-  → OpenRouterEmbedding.embed_query()  [checks own cache]
-  → List[float] (query embedding)
-  → ChromaVectorStore.search()
-  → List[SearchResult]
-  → RAGPipeline._build_context()
-  → str (context)
-  → OpenRouterLLM.generate()  [checks own cache]
-  → str (answer)
-  → store in RAG cache
-  → return Answer
+  → Embedding API (with own cache)
+  → [Semantic Cache Check] → HIT → return cached Answer
+  → MISS:
+    → ChromaDB search (top_k=3)
+    → Filter low-relevance (min_score=0.25)
+    → Build context from filtered chunks
+    → LLM API (with own cache)
+    → Store in both caches
+    → return Answer (or stream via SSE)
+```
+
+### Scheduler Flow
+```
+Scheduler (every 60min)
+  → POST /api/v1/token/ (JWT)
+  → GET /api/v1/messages/search/?page=1...N
+  → save_to_temp_file()
+  → IngestionPipeline.run()
+  → log_last_fetch()
+  → delete_temp_file()
+  → On error: retry with exponential backoff
 ```
 
 ## Error Handling Strategy
-- **Domain layer:** Custom exception hierarchy (`RAGException` → specific exceptions)
-- **Infrastructure layer:** Catches external errors (HTTP, DB), wraps in domain exceptions
-- **Pipeline layer:** Catches and re-raises as pipeline-specific exceptions
-- **API layer:** Translates domain exceptions to HTTP responses with appropriate status codes
+- **Domain layer:** Custom exception hierarchy (`RAGException` → specific)
+- **Infrastructure layer:** Catches external errors, wraps in domain exceptions
+- **Pipeline layer:** Catches and re-raises as pipeline exceptions
+- **API layer:** Translates domain exceptions to HTTP responses
+- **Scheduler layer:** Retry logic with backoff, logs errors to file

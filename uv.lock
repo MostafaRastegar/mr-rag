@@ -24,6 +24,7 @@ dev = [
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "python-multipart", specifier = ">=0.0.32" },
+    { name = "schedule", specifier = ">=1.2.2" },
 ]
 
 [[package]]
@@ -2747,6 +2748,15 @@ wheels = [
     { url = "https://cache.damavand.ir/repository/pypi/packages/rpds-py/2026.5.1/rpds_py-2026.5.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:b1be5c35683684d5331b93600c210e8367c254683d8a6df6bd21bd2da3a334fb" },
     { url = "https://cache.damavand.ir/repository/pypi/packages/rpds-py/2026.5.1/rpds_py-2026.5.1-cp315-cp315t-win32.whl", hash = "sha256:75808f6c38ce7749bb68cc2770161aae5045e6c6f6781a9782e74b93304399df" },
     { url = "https://cache.damavand.ir/repository/pypi/packages/rpds-py/2026.5.1/rpds_py-2026.5.1-cp315-cp315t-win_amd64.whl", hash = "sha256:90bd6630002a1c7f09e7843dd79f0d24f3d2897cc25a753480917865d14f15b3" },
+]
+
+[[package]]
+name = "schedule"
+version = "1.2.2"
+source = { registry = "https://cache.damavand.ir/repository/pypi/simple" }
+sdist = { url = "https://cache.damavand.ir/repository/pypi/packages/schedule/1.2.2/schedule-1.2.2.tar.gz", hash = "sha256:15fe9c75fe5fd9b9627f3f19cc0ef1420508f9f9a46f45cd0769ef75ede5f0b7" }
+wheels = [
+    { url = "https://cache.damavand.ir/repository/pypi/packages/schedule/1.2.2/schedule-1.2.2-py3-none-any.whl", hash = "sha256:5bef4a2a0183abf44046ae0d164cadcac21b1db011bdd8102e4a0c1e91e06a7d" },
 ]
 
 [[package]]

@@ -13,4 +13,5 @@ dev = [
     "pydantic-settings>=2.14.1",
     "python-dotenv>=1.2.2",
     "python-multipart>=0.0.32",
+    "schedule>=1.2.2",
 ]
