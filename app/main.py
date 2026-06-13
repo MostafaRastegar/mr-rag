@@ -18,7 +18,7 @@ from app.infrastructure.cache import (
     SQLiteCacheAdapter,
 )
 from app.infrastructure.chroma_vector_store import ChromaVectorStore
-from app.infrastructure.document_loader import JsonDocumentLoader
+from app.infrastructure.document_loader import AutoDocumentLoader
 from app.infrastructure.openrouter_embedding import OpenRouterEmbedding
 from app.infrastructure.openrouter_llm import OpenRouterLLM
 from app.infrastructure.text_splitter import LangChainTextSplitter
@@ -60,7 +60,7 @@ logging.getLogger(__name__).info(
 embedding = OpenRouterEmbedding(cache=_cache_embedding)
 llm = OpenRouterLLM(cache=_cache_llm)
 vector_store = ChromaVectorStore()
-document_loader = JsonDocumentLoader()
+document_loader = AutoDocumentLoader()
 text_splitter = LangChainTextSplitter()
 
 # Application pipelines

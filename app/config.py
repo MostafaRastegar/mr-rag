@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Models
-    embedding_model: str = "openai/text-embedding-ada-002"
-    llm_model: str = "meta-llama/llama-3.3-70b-instruct"
+    embedding_model: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
+    llm_model: str = "poolside/laguna-m.1:free"
 
     # ChromaDB
     chroma_host: str = "localhost"
