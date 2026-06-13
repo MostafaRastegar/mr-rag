@@ -1,314 +1,128 @@
-# Usage Guide
+# Features Overview
 
-## Prerequisites
+## click for [QUICK START](./USAGE.md)
 
-- Python 3.13+
-- Docker (for ChromaDB)
-- OpenRouter API key (free tier available)
+## 1. Core RAG Pipeline
 
-## Quick Start
+**Retrieval-Augmented Generation** for intelligent question-answering over scraped data.
 
-### 1. Environment Setup
-
-```bash
-# Clone the repository
-git clone git@github.com:MostafaRastegar/mr-rag.git
-cd mr-rag
-
-# Create virtual environment and activate
-uv venv
-source .venv/bin/activate
-
-# Install dependencies
-uv sync
-
-# Copy and fill in the environment variables
-cp .env.example .env
+### Ingestion
 ```
-
-### 2. Configure `.env`
-
-```env
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-EMBEDDING_MODEL=nvidia/llama-nemotron-embed-vl-1b-v2:free
-LLM_MODEL=poolside/laguna-m.1:free
+JSON File → Load → Chunk → Embed → Store in ChromaDB
 ```
+- Loads JSON files (supports `content` and `text` fields)
+- Splits text using LangChain's RecursiveCharacterTextSplitter
+- Generates embeddings via OpenRouter API
+- Stores vectors in ChromaDB (Docker)
 
-### 3. Start ChromaDB
-
-```bash
-docker compose up -d chromadb
+### Question Answering
 ```
-
-### 4. Start the API Server
-
-```bash
-uvicorn app.main:app --reload --port 8080
+Question → Embed → Search ChromaDB → Build Context → LLM → Answer
 ```
-
-The API is now available at `http://localhost:8080`. OpenAPI docs at `http://localhost:8080/docs`.
+- Embeds user questions
+- Retrieves top-K semantically similar chunks from ChromaDB
+- Filters low-relevance chunks (score < 0.25)
+- Builds context from filtered chunks
+- Generates answer via OpenRouter LLM
+- Returns answer with source citations and relevance scores
 
 ---
 
-## API Endpoints
+## 2. Multi-Layer Caching
 
-### Health Check
+Three independent cache tiers with different TTLs and backends.
 
-```bash
-curl http://localhost:8080/health
+| Layer | TTL | Cache Key | What It Caches |
+|-------|-----|-----------|----------------|
+| Embedding | 1 hour | Query text hash | Query → embedding vector |
+| LLM | 24 hours | Serialized messages | Messages → LLM response |
+| RAG Q&A | 24 hours | Question text + semantic similarity | Question → full answer |
+
+### RAG Cache: Two Sub-Layers
+
+```
+Question
+  → [Exact Match] identical text? → HIT → instant response
+  → MISS:
+    → Embedding API
+    → [Semantic Match] similar question? (cosine ≥ 0.92) → HIT → ~1s response
+    → MISS:
+      → ChromaDB + LLM → cache result
 ```
 
-Response: `{"status": "ok"}`
+**Cache Backends:**
+- InMemoryCache — wraps LangChain's `InMemoryCache` (ephemeral, default)
+- SQLiteCache — persistent across restarts with TTL
 
 ---
 
-### Ingest Data
+## 3. Streaming API
 
-Load a JSON file, split it into chunks, embed, and store in ChromaDB.
+Server-Sent Events (SSE) for real-time token delivery.
 
-```bash
-curl -X POST http://localhost:8080/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"file_path": "data/recipes_1.json"}'
 ```
-
-Response:
-```json
-{
-  "message": "Ingested 47 chunks from data/recipes_1.json",
-  "chunks": 47
-}
+POST /chat/stream
 ```
-
-**JSON format supported:**
-```json
-[
-  {"content": "text content here", "title": "optional title"},
-  {"content": "more text", "category": "food"}
-]
-```
+- First token appears in ~3-5 seconds
+- Progressive display while LLM generates
+- Cache works with streaming (cache hits return instantly)
+- Uses `httpx.AsyncClient.stream()` to stream from OpenRouter SSE
 
 ---
 
-### Chat (Full Response)
+## 4. Token Reduction
 
-Ask a question and get a complete answer with sources.
+Optimizations to reduce LLM token consumption by ~70%.
 
-```bash
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What is the recipe for fesenjan?"}'
-```
+| Setting | Before | After | Impact |
+|---------|--------|-------|--------|
+| `chunk_size` | 1024 | **512** | Smaller chunks = less text per chunk |
+| `top_k` | 5 | **3** | Fewer chunks sent to LLM |
+| `retrieval_min_score` | — | **0.25** | Filters irrelevant chunks |
+| `chunk_overlap` | 200 | **100** | Reduced redundancy |
 
-Response:
-```json
-{
-  "answer": "Fesenjan is a Persian stew made with...",
-  "sources": [
-    {
-      "chunk": {
-        "text": "مواد لازم فسنجون: یک کیلو مرغ، ۳۰۰ گرم گردو...",
-        "metadata": {"title": "دستور پخت فسنجون"},
-        "id": "chunk_3"
-      },
-      "score": 0.84
-    }
-  ]
-}
-```
+All settings are configurable via `.env` file.
 
 ---
 
-### Chat (Streaming)
+## 5. Scheduler Cron Job
 
-Ask a question and receive tokens progressively via SSE.
+Automated data ingestion from an external Scraper API.
 
-```bash
-curl -N -X POST http://localhost:8080/chat/stream \
-  -H "Content-Type: application/json" \
-  -d '{"question": "What is the recipe for fesenjan?"}'
+### Flow
+```
+Scheduler (every N minutes)
+  → POST /api/v1/token/ → JWT token
+  → GET /api/v1/messages/search/?page=1..N → all messages
+  → Save to temp JSON file
+  → Run IngestionPipeline (load → chunk → embed → store)
+  → Log: timestamp, total documents, status
+  → Delete temp file
 ```
 
-Output (progressive, character by character):
-```
-F
-Fe
-Fes
-Fese
-Fesen
-Fesenj
-...
-```
-
-**Note:** The `-N` flag disables curl's buffering for real-time display.
+### Features
+- Configurable interval (default: 60 minutes)
+- JWT authentication with auto-refresh
+- Pagination support (automatic page 1..N)
+- **Exponential backoff retry** on API failure (60s, 120s, 240s, ... up to 5 attempts)
+- Temp file lifecycle: auto-created → auto-deleted after success
+- Last-fetch log: `data/scheduler_log.json`
 
 ---
 
-## Cache Behavior
+## 6. Architecture: Hexagonal (Ports & Adapters)
 
-Test the caching yourself:
+Clean separation between domain, application, infrastructure, and scheduler layers.
 
-```bash
-# First call — takes ~5-10s (cache miss → ChromaDB + LLM)
-curl -s -X POST http://localhost:8080/chat \
-  -d '{"question": "How to make fesenjan?"}'
+**6 Abstract Ports:**
+- `EmbeddingPort` — generate embeddings
+- `LLMPort` — generate text (standard + streaming)
+- `VectorStorePort` — store/search vectors
+- `DocumentLoaderPort` — load documents from sources
+- `TextSplitterPort` — split documents into chunks
+- `CachePort` — cache responses (with semantic lookup)
 
-# Second call — instant! (exact cache hit)
-curl -s -X POST http://localhost:8080/chat \
-  -d '{"question": "How to make fesenjan?"}'
-
-# Similar question — ~1s (semantic cache hit, cosine similarity)
-curl -s -X POST http://localhost:8080/chat \
-  -d '{"question": "How do I cook fesenjan?"}'
-```
-
----
-
-## Scheduler (Automated Ingestion)
-
-Periodically fetch data from an external Scraper API and ingest it automatically.
-
-### Run the Scheduler
-
-```bash
-# In a separate terminal
-python -m app.scheduler.runner
-```
-
-### Scheduler Configuration (`.env`)
-
-```env
-# Scraper API
-SCRAPER_API_URL=https://your-scraper-api.com
-SCRAPER_USERNAME=your-username
-SCRAPER_PASSWORD=your-password
-
-# Schedule
-CRON_INTERVAL_MINUTES=60
-
-# Retry on failure
-MAX_RETRIES=5
-RETRY_DELAY_SECONDS=60
-```
-
-### Check Scheduler Status
-
-```bash
-# Log file location
-cat data/scheduler_log.json
-```
-
-Example output:
-```json
-{
-  "last_fetch": "2026-06-10T12:30:00+00:00",
-  "total_documents": 150,
-  "status": "success"
-}
-```
-
----
-
-## Configuration Reference
-
-All settings are in `.env` file:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | — | OpenRouter API key |
-| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | API base URL |
-| `EMBEDDING_MODEL` | `nvidia/llama-nemotron-embed-vl-1b-v2:free` | Embedding model |
-| `LLM_MODEL` | `meta-llama/llama-3.3-70b-instruct` | LLM model |
-| `CHROMA_HOST` | `127.0.0.1` | ChromaDB host |
-| `CHROMA_PORT` | `8000` | ChromaDB port |
-| `APP_HOST` | `0.0.0.0` | App listen address |
-| `APP_PORT` | `8080` | App listen port |
-| `CHUNK_SIZE` | `512` | Text chunk size (characters) |
-| `CHUNK_OVERLAP` | `100` | Chunk overlap |
-| `TOP_K` | `3` | Number of chunks retrieved |
-| `RETRIEVAL_MIN_SCORE` | `0.25` | Minimum relevance score |
-| `CACHE_TYPE` | `memory` | Cache backend: `memory` or `sqlite` |
-| `CACHE_SEMANTIC_ENABLED` | `true` | Enable semantic cache |
-| `CACHE_SEMANTIC_THRESHOLD` | `0.92` | Semantic similarity threshold |
-| `SCRAPER_API_URL` | — | External Scraper API URL |
-| `SCRAPER_USERNAME` | — | Scraper API username |
-| `SCRAPER_PASSWORD` | — | Scraper API password |
-| `CRON_INTERVAL_MINUTES` | `60` | Scheduler interval |
-| `MAX_RETRIES` | `5` | Max scheduler retries |
-| `RETRY_DELAY_SECONDS` | `60` | Initial retry delay |
-
----
-
-## Project Structure
-
-```
-mr-rag/
-├── app/
-│   ├── api/                    # FastAPI endpoints
-│   │   ├── routes.py           # /health, /ingest, /chat, /chat/stream
-│   │   └── schemas.py          # Pydantic request/response models
-│   ├── core/                   # Domain layer (no external deps)
-│   │   ├── domain.py           # Data classes
-│   │   ├── exceptions.py       # Exception hierarchy
-│   │   └── ports.py            # Abstract interfaces (6 ports)
-│   ├── infrastructure/         # Adapters (external integrations)
-│   │   ├── cache.py            # InMemoryCacheAdapter, SQLiteCacheAdapter, SemanticCacheAdapter
-│   │   ├── chroma_vector_store.py
-│   │   ├── document_loader.py
-│   │   ├── openrouter_embedding.py
-│   │   ├── openrouter_llm.py
-│   │   └── text_splitter.py
-│   ├── pipeline/               # Business logic
-│   │   ├── ingestion.py        # Load → split → embed → store
-│   │   └── rag.py              # Embed → search → generate (with cache)
-│   ├── scheduler/              # Cron job
-│   │   ├── config.py           # Scheduler settings
-│   │   ├── auth.py             # JWT authentication
-│   │   ├── client.py           # Scraper API client
-│   │   ├── job.py              # Job logic
-│   │   ├── logger.py           # Last-fetch log
-│   │   └── runner.py           # Cron loop
-│   ├── config.py               # App settings
-│   └── main.py                 # FastAPI app + DI wiring
-├── data/                       # JSON data files
-├── memory-bank/                # Project documentation
-├── FEATURES.md                  # Feature overview
-├── USAGE.md                     # Usage guide
-├── docker-compose.yml
-└── pyproject.toml
-```
-
----
-
-## Troubleshooting
-
-### ChromaDB Connection Refused
-```bash
-# Ensure ChromaDB is running
-docker ps | grep chromadb
-
-# Start if not running
-docker compose up -d chromadb
-
-# Wait a few seconds for it to be ready
-```
-
-### OpenRouter API Errors
-```bash
-# Check your API key is set
-grep OPENROUTER_API_KEY .env
-
-# Free models may be rate-limited; try different models
-# Set LLM_MODEL=openai/gpt-4o-mini in .env
-```
-
-### No Results Found
-```bash
-# First, ingest some data
-curl -X POST http://localhost:8080/ingest \
-  -d '{"file_path": "data/recipes_1.json"}'
-
-# Then ask questions
-curl -X POST http://localhost:8080/chat \
-  -d '{"question": "your question here"}'
+**Benefits:**
+- Swap any component without changing other code
+- Easy to test (mock ports)
+- New providers implement existing interfaces
