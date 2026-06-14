@@ -1,6 +1,7 @@
 # Features Overview
 
 ## click for [QUICK START](./USAGE.md)
+## click for [Reade Features](./FEATURES.md)
 
 ## 1. Core RAG Pipeline
 

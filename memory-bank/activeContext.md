@@ -1,7 +1,7 @@
 # Active Context
 
 ## Current Focus
-**Documentation Complete** — All features implemented and memory bank fully updated.
+**Synonym Handling** — Three-stage cascading retrieval added (Query Expansion + Loose Prompt)
 
 ## What Has Been Built
 
@@ -75,6 +75,40 @@
 | 2026-06-10 | Streaming API: `POST /chat/stream` with SSE |
 | 2026-06-10 | Semantic cache: hybrid exact + cosine similarity matching |
 | 2026-06-10 | LangChain cache adapters: InMemoryCacheAdapter, SQLiteCacheAdapter |
+| 2026-06-14 | Three-stage cascading retrieval (Query Expansion + Loose Prompt) |
+
+## New Features: Synonym-Aware Retrieval
+
+### Three-Stage Cascade (final)
+1. **Stage 1 — Normal Search**: embed → search → filter → generate
+   - If cascade is enabled, `allow_low_score_fallback=False` → returns empty if all scores below `min_score`
+   - `_is_low_relevance()` checks average score < 0.30 to trigger cascade
+2. **Stage 2 — Query Expansion** (opt-in via `query_expansion_enabled`):
+   - If Stage 1 returns no results or low-relevance results, LLM generates N alternative phrasings with synonyms
+   - Each variant gets embedded and searched; results deduplicated by chunk ID
+   - Early-stop when enough unique chunks collected
+3. **Stage 3 — Loose Prompt** (opt-in via `loose_prompt_enabled`):
+   - Always activates regardless of Stage 2 outcome (even if chunks were found)
+   - Three sub-modes depending on context availability:
+     - Context exists + loose → `SYSTEM_PROMPT_LOOSE`: "use context, supplement with own knowledge"
+     - No context + loose → `SYSTEM_PROMPT_GENERAL`: "answer based on general knowledge"
+     - Context exists + strict → `SYSTEM_PROMPT`: "answer based only on context" (original)
+
+### Key Implementation Details
+- **`_is_low_relevance()`** — static method, checks average score < 0.30
+- **`_expand_query()`** — calls LLM with `QUERY_EXPANSION_PROMPT`, parses output line-by-line
+- **`_search_with_expansion()`** — embeds each variant, searches, deduplicates, merges, re-sorts by score
+- **`_search(allow_low_score_fallback)`** — new parameter to control whether low-score fallback is allowed
+- **`SYSTEM_PROMPT_GENERAL`** — purely for no-context general knowledge answers
+- **`SYSTEM_PROMPT_LOOSE`** — for context + supplement mode
+- **`SYSTEM_PROMPT`** — original strict mode (unchanged)
+
+### Configuration Flags (all default: `False`)
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `query_expansion_enabled` | `False` | Enable/disable query expansion when results are low-relevance |
+| `query_expansion_count` | `3` | Number of alternative phrasings for LLM to generate |
+| `loose_prompt_enabled` | `False` | Enable/disable relaxed system prompt (Stage 3) |
 
 ## Next Steps
 - [ ] Dockerfile sync (requirements.txt vs pyproject.toml)

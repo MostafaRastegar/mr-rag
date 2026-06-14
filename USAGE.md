@@ -231,6 +231,9 @@ All settings are in `.env` file:
 | `CACHE_TYPE` | `memory` | Cache backend: `memory` or `sqlite` |
 | `CACHE_SEMANTIC_ENABLED` | `true` | Enable semantic cache |
 | `CACHE_SEMANTIC_THRESHOLD` | `0.92` | Semantic similarity threshold |
+| `QUERY_EXPANSION_ENABLED` | `false` | Enable synonym-aware query expansion (Stage 2) |
+| `QUERY_EXPANSION_COUNT` | `3` | Number of alternative phrasings to generate |
+| `LOOSE_PROMPT_ENABLED` | `false` | Enable relaxed system prompt fallback (Stage 3) |
 | `SCRAPER_API_URL` | — | External Scraper API URL |
 | `SCRAPER_USERNAME` | — | Scraper API username |
 | `SCRAPER_PASSWORD` | — | Scraper API password |
@@ -278,6 +281,68 @@ mr-rag/
 ├── docker-compose.yml
 └── pyproject.toml
 ```
+
+---
+
+---
+
+## Cascading Retrieval (Synonym Support)
+
+When enabled, the RAG pipeline uses a three-stage cascade to handle questions with synonyms or alternative phrasings.
+
+### How It Works
+
+```
+Stage 1 — Normal Search (always runs)
+  → embed query → search ChromaDB → filter by min_score
+  → If results are high-relevance → use strict prompt → done
+  → If results are empty or low-relevance (avg score < 0.30):
+     │
+     └─→ Stage 2 — Query Expansion (if enabled)
+           → LLM generates N alternative phrasings with synonyms
+           → Embed each variant → search → deduplicate → merge
+           → If meaningful chunks found → use strict prompt → done
+           │
+           └─→ Stage 3 — Loose Prompt (if enabled)
+                 → Context exists: SYSTEM_PROMPT_LOOSE (supplement with own knowledge)
+                 → No context: SYSTEM_PROMPT_GENERAL (answer from general knowledge)
+```
+
+### Configuration
+
+All three flags default to `false`, meaning the pipeline behaves **exactly like the original** unless you opt in.
+
+```env
+# In .env file:
+
+# Stage 2: Query Expansion
+QUERY_EXPANSION_ENABLED=true
+QUERY_EXPANSION_COUNT=3
+
+# Stage 3: Loose Prompt
+LOOSE_PROMPT_ENABLED=true
+```
+
+### Example Usage
+
+```bash
+# Without cascade (both false) — synonym won't match
+curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "پروژه را چطور launch کنم"}'
+
+# With cascade enabled — query expansion generates:
+# "پروژه را چطور run کنم", "روش راه‌اندازی پروژه", etc.
+# Then searches each variant and merges results
+```
+
+### Prompt Modes
+
+| Mode | System Prompt | Context Available | Behavior |
+|------|---------------|-------------------|----------|
+| Strict (original) | `SYSTEM_PROMPT` | Yes | "Answer based only on the context" |
+| Loose with context | `SYSTEM_PROMPT_LOOSE` | Yes | "Use context, supplement with own knowledge" |
+| Loose no context | `SYSTEM_PROMPT_GENERAL` | No | "Answer based on your general knowledge" |
 
 ---
 
