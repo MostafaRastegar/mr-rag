@@ -22,6 +22,7 @@
 - Two-layer cache: exact → semantic → full pipeline
 - **`answer_stream()`** for streaming responses
 - Score filtering (min_score=0.25) for token reduction
+- **Three-stage cascading retrieval** for synonym-aware question answering
 
 ### FastAPI Routes
 - `GET /health` — Service health check
@@ -80,3 +81,4 @@
 | 2026-06-10 | SSE streaming via `httpx.AsyncClient.stream()` | OpenRouter API supports SSE natively |
 | 2026-06-10 | Token reduction: chunk_size=512, top_k=3, min_score=0.25 | ~70% savings in LLM tokens |
 | 2026-06-10 | Scheduler cron job with `schedule` library | Lightweight, no system cron needed |
+| 2026-06-14 | Three-stage cascading retrieval (Query Expansion + Loose Prompt) | Handle synonym-based questions and out-of-context queries |

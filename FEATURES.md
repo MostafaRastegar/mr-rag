@@ -1,8 +1,5 @@
 # Features Overview
 
-## click for [QUICK START](./USAGE.md)
-## click for [Reade Features](./FEATURES.md)
-
 ## 1. Core RAG Pipeline
 
 **Retrieval-Augmented Generation** for intelligent question-answering over scraped data.
@@ -111,7 +108,40 @@ Scheduler (every N minutes)
 
 ---
 
-## 6. Architecture: Hexagonal (Ports & Adapters)
+## 6. Cascading Retrieval (Synonym Support)
+
+Three-stage cascade to handle questions with synonyms, alternative phrasings, or out-of-context queries.
+
+### Flow
+```
+Stage 1 — Normal Search (always runs)
+  → embed query → search ChromaDB → filter by min_score
+  → If results are high-relevance → use strict prompt → done
+  → If results are empty or low-relevance (avg score < 0.30):
+     │
+     └─→ Stage 2 — Query Expansion (if enabled via .env)
+           → LLM generates N alternative phrasings with synonyms
+           → Embed each variant → search → deduplicate by chunk ID
+           → Merge & re-sort by score → early-stop when enough chunks
+           │
+           └─→ Stage 3 — Loose Prompt (if enabled via .env)
+                 → Context exists: SYSTEM_PROMPT_LOOSE (supplement with own knowledge)
+                 → No context: SYSTEM_PROMPT_GENERAL (answer from general knowledge)
+```
+
+### Configuration
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `query_expansion_enabled` | `false` | Enable synonym-aware query expansion |
+| `query_expansion_count` | `3` | Number of alternative phrasings to generate |
+| `loose_prompt_enabled` | `false` | Enable general knowledge fallback |
+
+### When All Flags Are `false` (default)
+Pipeline behaves **identically** to the original — no extra LLM calls, no relaxed prompts.
+
+---
+
+## 7. Architecture: Hexagonal (Ports & Adapters)
 
 Clean separation between domain, application, infrastructure, and scheduler layers.
 

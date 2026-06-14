@@ -6,6 +6,7 @@ RecursiveCharacterTextSplitter for document chunking.
 """
 
 import logging
+import uuid
 from typing import List
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -66,7 +67,7 @@ class LangChainTextSplitter(TextSplitterPort):
         for i, lc_chunk in enumerate(lc_chunks):
             chunks.append(
                 Chunk(
-                    id=f"chunk_{i}",
+                    id=f"chunk_{uuid.uuid4().hex[:12]}_{i}",
                     text=lc_chunk.page_content,
                     metadata={k: v for k, v in lc_chunk.metadata.items()},
                 )

@@ -5,12 +5,16 @@ Orchestrates the retrieval-augmented generation workflow:
 embed query → search vector store → build context → generate answer.
 Depends only on abstract ports, not on concrete implementations.
 Supports optional full Q&A caching via CachePort.
+
+Three-stage cascading retrieval (controlled by settings flags):
+  Stage 1 — Normal strict retrieval (current behavior)
+  Stage 2 — Query Expansion (if no chunks found, re-phrase & retry)
+  Stage 3 — Loose Prompt (if still no chunks, relax the system prompt)
 """
 
-import hashlib
 import json
 import logging
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List
 
 from app.config import settings
 from app.core.domain import Answer, Message, SearchResult
@@ -25,6 +29,22 @@ SYSTEM_PROMPT = (
     "If the context doesn't contain enough information, say so clearly."
 )
 
+SYSTEM_PROMPT_LOOSE = (
+    "You are a helpful assistant. Answer the user's question using the provided context "
+    "as your primary source. If the context does not contain enough information to fully "
+    "answer the question, you may supplement with your own knowledge — but clearly indicate "
+    "which parts come from the provided context and which come from your general knowledge."
+)
+
+SYSTEM_PROMPT_GENERAL = "You are a helpful assistant. Answer the user's question based on your general knowledge."
+
+QUERY_EXPANSION_PROMPT = (
+    "Rewrite the following question in {count} different ways. "
+    "Use synonyms, rephrase the structure, and vary the wording to cover "
+    "alternative phrasings of the same question. "
+    "Output one variant per line, with no numbering, no bullet points, and no extra text."
+)
+
 
 class RAGPipeline:
     """
@@ -33,10 +53,11 @@ class RAGPipeline:
     Follows the Dependency Inversion Principle: depends on
     abstract ports injected at construction time.
 
-    If a CachePort instance is provided, full question → answer
-    results are cached. On repeated identical questions, the entire
-    pipeline (embedding + search + LLM) is skipped and the cached
-    answer is returned immediately for maximum speed.
+    Supports a three-stage cascading strategy:
+      1. Normal strict retrieval
+      2. Query expansion (re-phrase and re-search)
+      3. Loose prompt (relaxed system instruction)
+    Each stage is gated by its respective setting flag.
     """
 
     def __init__(
@@ -51,18 +72,25 @@ class RAGPipeline:
         self._vector_store = vector_store
         self._cache = cache
 
+    # ------------------------------------------------------------------
+    # Public API: blocking answer
+    # ------------------------------------------------------------------
+
     def answer(self, question: str) -> Answer:
         """
-        Answer a question using RAG.
+        Answer a question using RAG with cascading retrieval strategy.
 
-        Two-layer cache strategy:
+        Three-layer cache strategy:
         1. **Exact-match cache** (text hash) — for questions that are
            character-for-character identical to a previous question.
         2. **Semantic cache** (embedding cosine similarity) — for questions
            that are semantically similar but not textually identical.
+        3. On cache miss: runs the full retrieval pipeline.
 
-        On cache hit at either layer, returns the cached Answer immediately
-        without any search or LLM calls.
+        Retrieval cascade:
+        - Stage 1: Normal search + strict prompt
+        - Stage 2 (if enabled): Query expansion when no chunks found
+        - Stage 3 (if enabled): Loose prompt when still no chunks
 
         Args:
             question: The user's question.
@@ -113,17 +141,35 @@ class RAGPipeline:
                         "Semantic cache entry malformed, re-running pipeline"
                     )
 
-        # Step 2: Retrieve relevant documents
-        try:
-            results: List[SearchResult] = self._vector_store.search(
-                query_embedding=query_embedding,
-                top_k=settings.top_k,
-            )
-        except Exception as e:
-            logger.error("Vector store search failed: %s", str(e))
-            raise RetrievalError(f"Failed to search vector store: {e}") from e
+        # ------------------------------------------------------------------
+        # Stage 1 — Normal retrieval
+        # ------------------------------------------------------------------
+        # If any cascade stage is enabled, don't fall back to low-score chunks
+        # in Stage 1 — let the cascade handle it.
+        use_cascade = settings.query_expansion_enabled or settings.loose_prompt_enabled
+        results = self._search(
+            query_embedding, allow_low_score_fallback=not use_cascade
+        )
+        use_loose_prompt = False
 
-        if not results:
+        # Cascade trigger: empty results OR low-relevance results
+        needs_expansion = not results or (
+            use_cascade and results and self._is_low_relevance(results)
+        )
+
+        # If query expansion is enabled and cascade is needed → Stage 2
+        if needs_expansion and settings.query_expansion_enabled:
+            logger.info(
+                "Stage 1 results low-relevance — trying query expansion (Stage 2)"
+            )
+            results = self._search_with_expansion(question)
+
+        # If loose prompt is enabled → Stage 3 (regardless of Stage 2 outcome)
+        if settings.loose_prompt_enabled:
+            logger.info("Loose prompt enabled — relaxing system prompt (Stage 3)")
+            use_loose_prompt = True
+
+        if not results and not use_loose_prompt:
             logger.warning("No relevant documents found for question")
             answer = Answer(
                 text="I couldn't find any relevant information to answer your question.",
@@ -139,44 +185,49 @@ class RAGPipeline:
                 )
             return answer
 
-        # Filter out low-relevance chunks to save tokens
-        min_score = settings.retrieval_min_score
-        if min_score > 0:
-            filtered = [r for r in results if r.score >= min_score]
-            if filtered:
-                logger.info(
-                    "Filtered %d/%d low-scoring chunks (min_score=%.2f)",
-                    len(results) - len(filtered),
-                    len(results),
-                    min_score,
-                )
-                results = filtered
-            else:
-                logger.warning(
-                    "All chunks below min_score=%.2f, keeping the best one", min_score
-                )
-                results = results[:1]
+        # Build context from retrieved chunks (may be empty for Stage 3)
+        context = self._build_context(results) if results else ""
 
-        logger.info("Retrieved %d relevant chunks", len(results))
-
-        # Step 3: Build context from retrieved documents
-        context = self._build_context(results)
-
-        # Step 4: Generate answer using LLM
+        # Generate answer using LLM
         try:
+            if context and not use_loose_prompt:
+                # Strict mode: answer based only on context
+                user_content = (
+                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
+                    f"Answer based only on the context above:"
+                )
+                system_prompt = SYSTEM_PROMPT
+            elif context and use_loose_prompt:
+                # Loose mode with context: use context as primary source, supplement with own knowledge
+                user_content = (
+                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
+                    f"Use the context as your primary source, but you may supplement "
+                    f"with your own knowledge if it is insufficient. Clearly indicate "
+                    f"which parts come from the context and which from your knowledge."
+                )
+                system_prompt = SYSTEM_PROMPT_LOOSE
+            elif not context and use_loose_prompt:
+                # No context at all: answer from general knowledge
+                user_content = f"Question: {question}"
+                system_prompt = SYSTEM_PROMPT_GENERAL
+            else:
+                # No context and no loose prompt: can't answer
+                user_content = (
+                    f"Question: {question}\n\n"
+                    f"No specific context was retrieved for this question."
+                )
+                system_prompt = SYSTEM_PROMPT
+
             messages = [
-                Message(role="system", content=SYSTEM_PROMPT),
-                Message(
-                    role="user",
-                    content=f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer based only on the context above:",
-                ),
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=user_content),
             ]
             answer_text = self._llm.generate(messages)
         except Exception as e:
             logger.error("LLM generation failed: %s", str(e))
             raise RetrievalError(f"Failed to generate answer: {e}") from e
 
-        answer = Answer(text=answer_text, sources=results)
+        answer = Answer(text=answer_text, sources=results or [])
 
         # Store full answer in cache for future identical questions
         if self._cache is not None:
@@ -193,16 +244,16 @@ class RAGPipeline:
 
         return answer
 
+    # ------------------------------------------------------------------
+    # Public API: streaming answer
+    # ------------------------------------------------------------------
+
     async def answer_stream(self, question: str) -> AsyncGenerator[str, None]:
         """
         Answer a question using RAG with streaming response.
 
-        Same two-layer cache strategy as `answer()`, but instead of waiting
-        for the full LLM response, yields tokens progressively as they arrive
-        from the OpenRouter SSE stream.
-
-        On cache hit (exact or semantic), yields the full cached answer as a
-        single token and returns immediately.
+        Same three-stage cascading strategy as `answer()`, but yields
+        tokens progressively as they arrive from the LLM SSE stream.
 
         Args:
             question: The user's question.
@@ -248,58 +299,78 @@ class RAGPipeline:
                 except (json.JSONDecodeError, KeyError):
                     logger.warning("Semantic cache entry malformed, re-running")
 
-        # Step 2: Retrieve relevant documents
-        try:
-            results: List[SearchResult] = self._vector_store.search(
-                query_embedding=query_embedding,
-                top_k=settings.top_k,
-            )
-        except Exception as e:
-            logger.error("Vector store search failed: %s", str(e))
-            raise RetrievalError(f"Failed to search vector store: {e}") from e
+        # ------------------------------------------------------------------
+        # Stage 1 — Normal retrieval
+        # ------------------------------------------------------------------
+        # If any cascade stage is enabled, don't fall back to low-score chunks
+        # in Stage 1 — let the cascade handle it.
+        use_cascade = settings.query_expansion_enabled or settings.loose_prompt_enabled
+        results = self._search(
+            query_embedding, allow_low_score_fallback=not use_cascade
+        )
+        use_loose_prompt = False
 
-        if not results:
-            logger.warning("No relevant documents found for question")
-            no_answer = (
-                "I couldn't find any relevant information to answer your question."
+        # Cascade trigger: empty results OR low-relevance results
+        needs_expansion = not results or (
+            use_cascade and results and self._is_low_relevance(results)
+        )
+
+        # If query expansion is enabled and cascade is needed → Stage 2
+        if needs_expansion and settings.query_expansion_enabled:
+            logger.info(
+                "Stage 1 results low-relevance — trying query expansion (Stage 2)"
             )
-            yield no_answer
+            results = self._search_with_expansion(question)
+
+        # If loose prompt is enabled → Stage 3 (regardless of Stage 2 outcome)
+        if settings.loose_prompt_enabled:
+            logger.info("Loose prompt enabled — relaxing system prompt (Stage 3)")
+            use_loose_prompt = True
+
+        if not results and not use_loose_prompt:
+            logger.warning("No relevant documents found for question")
+            yield "I couldn't find any relevant information to answer your question."
             return
 
-        # Filter out low-relevance chunks to save tokens
-        min_score = settings.retrieval_min_score
-        if min_score > 0:
-            filtered = [r for r in results if r.score >= min_score]
-            if filtered:
-                logger.info(
-                    "Filtered %d/%d low-scoring chunks (min_score=%.2f)",
-                    len(results) - len(filtered),
-                    len(results),
-                    min_score,
-                )
-                results = filtered
-            else:
-                logger.warning(
-                    "All chunks below min_score=%.2f, keeping the best one", min_score
-                )
-                results = results[:1]
+        # Build context from retrieved chunks (may be empty for Stage 3)
+        context = self._build_context(results) if results else ""
 
-        logger.info("Retrieved %d relevant chunks", len(results))
-
-        # Step 3: Build context from retrieved documents
-        context = self._build_context(results)
-
-        # Step 4: Stream answer from LLM
-        messages = [
-            Message(role="system", content=SYSTEM_PROMPT),
-            Message(
-                role="user",
-                content=f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer based only on the context above:",
-            ),
-        ]
-
-        answer_parts: List[str] = []
+        # Stream answer from LLM
         try:
+            if context and not use_loose_prompt:
+                # Strict mode: answer based only on context
+                user_content = (
+                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
+                    f"Answer based only on the context above:"
+                )
+                system_prompt = SYSTEM_PROMPT
+            elif context and use_loose_prompt:
+                # Loose mode with context: use context as primary source, supplement with own knowledge
+                user_content = (
+                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
+                    f"Use the context as your primary source, but you may supplement "
+                    f"with your own knowledge if it is insufficient. Clearly indicate "
+                    f"which parts come from the context and which from your knowledge."
+                )
+                system_prompt = SYSTEM_PROMPT_LOOSE
+            elif not context and use_loose_prompt:
+                # No context at all: answer from general knowledge
+                user_content = f"Question: {question}"
+                system_prompt = SYSTEM_PROMPT_GENERAL
+            else:
+                # No context and no loose prompt: can't answer
+                user_content = (
+                    f"Question: {question}\n\n"
+                    f"No specific context was retrieved for this question."
+                )
+                system_prompt = SYSTEM_PROMPT
+
+            messages = [
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=user_content),
+            ]
+
+            answer_parts: List[str] = []
             async for token in self._llm.generate_stream(messages):
                 answer_parts.append(token)
                 yield token
@@ -319,6 +390,179 @@ class RAGPipeline:
                     query_embedding, json.dumps({"text": full_answer})
                 )
             logger.info("RAG streaming cache UPDATED")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_low_relevance(results: List[SearchResult]) -> bool:
+        """
+        Check if the retrieved results have low relevance overall.
+
+        Returns True if the average score of all results is below 0.3,
+        indicating the model couldn't find a good match and cascade is needed.
+        """
+        if not results:
+            return True
+        avg_score = sum(r.score for r in results) / len(results)
+        logger.info("Average relevance score: %.4f (threshold: 0.30)", avg_score)
+        return avg_score < 0.30
+
+    def _search(
+        self, query_embedding: List[float], allow_low_score_fallback: bool = True
+    ) -> List[SearchResult]:
+        """
+        Run a single search against the vector store and filter results.
+
+        Args:
+            query_embedding: The embedding vector to search with.
+            allow_low_score_fallback: If True and all results are below min_score,
+                keep the single best result (original behavior).
+                If False, return empty list so the cascade (Stage 2/3) can proceed.
+
+        Returns:
+            A list of SearchResult objects that pass the min_score filter,
+            or an empty list if nothing relevant was found.
+        """
+        try:
+            results: List[SearchResult] = self._vector_store.search(
+                query_embedding=query_embedding,
+                top_k=settings.top_k,
+            )
+        except Exception as e:
+            logger.error("Vector store search failed: %s", str(e))
+            raise RetrievalError(f"Failed to search vector store: {e}") from e
+
+        if not results:
+            return []
+
+        # Filter out low-relevance chunks to save tokens
+        min_score = settings.retrieval_min_score
+        if min_score > 0:
+            filtered = [r for r in results if r.score >= min_score]
+            if filtered:
+                logger.info(
+                    "Filtered %d/%d low-scoring chunks (min_score=%.2f)",
+                    len(results) - len(filtered),
+                    len(results),
+                    min_score,
+                )
+                results = filtered
+            elif allow_low_score_fallback:
+                logger.warning(
+                    "All chunks below min_score=%.2f, keeping the best one", min_score
+                )
+                results = results[:1]
+            else:
+                logger.warning(
+                    "All chunks below min_score=%.2f — returning empty for cascade",
+                    min_score,
+                )
+                return []
+
+        logger.info("Retrieved %d relevant chunks", len(results))
+        return results
+
+    def _expand_query(self, question: str) -> List[str]:
+        """
+        Use the LLM to generate alternative phrasings of the user's question.
+
+        Returns:
+            A list of alternative question strings (including the original).
+        """
+        count = settings.query_expansion_count
+        if count < 1:
+            return [question]
+
+        prompt = QUERY_EXPANSION_PROMPT.format(count=count)
+        messages = [
+            Message(role="system", content=prompt),
+            Message(role="user", content=question),
+        ]
+
+        try:
+            raw = self._llm.generate(messages, temperature=0.7, max_tokens=512)
+        except Exception as e:
+            logger.warning(
+                "Query expansion failed: %s — using original question only", str(e)
+            )
+            return [question]
+
+        # Parse lines, strip whitespace, remove empty lines
+        variants = [line.strip() for line in raw.splitlines() if line.strip()]
+
+        # Limit to requested count, add original question at the front
+        all_queries = [question] + variants[:count]
+        logger.info(
+            "Query expansion generated %d variant(s): %s",
+            len(all_queries) - 1,
+            all_queries,
+        )
+        return all_queries
+
+    def _search_with_expansion(self, question: str) -> List[SearchResult]:
+        """
+        Expand the query into multiple phrasings, embed each, and merge results.
+
+        Returns:
+            A merged list of SearchResult objects (deduplicated by chunk ID),
+            or an empty list if nothing was found.
+        """
+        queries = self._expand_query(question)
+        seen_ids: set[str] = set()
+        merged: List[SearchResult] = []
+
+        for q in queries:
+            try:
+                emb = self._embedding.embed_query(q)
+            except Exception as e:
+                logger.warning(
+                    "Failed to embed expanded query '%s': %s", q[:50], str(e)
+                )
+                continue
+
+            try:
+                batch: List[SearchResult] = self._vector_store.search(
+                    query_embedding=emb,
+                    top_k=settings.top_k,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Search failed for expanded query '%s': %s", q[:50], str(e)
+                )
+                continue
+
+            for result in batch:
+                if result.chunk.id and result.chunk.id not in seen_ids:
+                    seen_ids.add(result.chunk.id)
+                    merged.append(result)
+
+            # Early stop: if we already have enough results, break
+            if len(merged) >= settings.top_k:
+                logger.info(
+                    "Collected %d unique chunks from expansion, stopping early",
+                    len(merged),
+                )
+                break
+
+        if not merged:
+            logger.warning("Query expansion returned no results either")
+            return []
+
+        # Re-sort by score descending (highest relevance first)
+        merged.sort(key=lambda r: r.score, reverse=True)
+
+        # Apply the same min_score filter but keep top_k max
+        min_score = settings.retrieval_min_score
+        if min_score > 0:
+            filtered = [r for r in merged if r.score >= min_score]
+            if filtered:
+                merged = filtered
+        merged = merged[: settings.top_k]
+
+        logger.info("Merged %d unique chunks from query expansion", len(merged))
+        return merged
 
     def _build_context(self, results: List[SearchResult]) -> str:
         """Build a context string from retrieved search results."""

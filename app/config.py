@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Models
-    embedding_model: str = "openai/text-embedding-ada-002"
-    llm_model: str = "meta-llama/llama-3.3-70b-instruct"
+    embedding_model: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
+    llm_model: str = "poolside/laguna-m.1:free"
 
     # ChromaDB
     chroma_host: str = "localhost"
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Retrieval
     top_k: int = 3
     retrieval_min_score: float = (
-        0.25  # minimum cosine score to include a chunk in context
+        0.15  # minimum cosine score to include a chunk in context
     )
 
     # Cache
@@ -48,6 +48,18 @@ class Settings(BaseSettings):
     cache_semantic_enabled: bool = True
     cache_semantic_threshold: float = 0.92  # cosine similarity threshold (0.0-1.0)
     cache_semantic_maxsize: int = 500  # max cached question-answer pairs in memory
+
+    # Query Expansion (Stage 2)
+    # When enabled, if the initial search finds no relevant chunks, the LLM
+    # generates alternative phrasings of the user's question to improve retrieval.
+    query_expansion_enabled: bool = False
+    query_expansion_count: int = 3
+
+    # Loose Prompt (Stage 3)
+    # When enabled, if even query expansion finds no relevant chunks, the LLM
+    # is prompted with a relaxed instruction that allows it to use its own
+    # knowledge when the context is insufficient.
+    loose_prompt_enabled: bool = False
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

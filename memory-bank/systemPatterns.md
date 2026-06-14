@@ -122,7 +122,7 @@ JSON File → JsonDocumentLoader.load()
          → int (count)
 ```
 
-### RAG Flow (with caching)
+### RAG Flow (with caching + cascading retrieval)
 ```
 Question
 → [Exact Cache Check] → HIT → return cached Answer
@@ -130,12 +130,26 @@ Question
   → Embedding API (with own cache)
   → [Semantic Cache Check] → HIT → return cached Answer
   → MISS:
-    → ChromaDB search (top_k=3)
-    → Filter low-relevance (min_score=0.25)
-    → Build context from filtered chunks
-    → LLM API (with own cache)
-    → Store in both caches
-    → return Answer (or stream via SSE)
+    → Stage 1: ChromaDB search (top_k=3)
+      → Filter low-relevance (min_score)
+      → allow_low_score_fallback=False if cascade enabled
+      → _is_low_relevance() if cascade enabled (avg < 0.30)
+      → If no/low results + query_expansion_enabled=True:
+        │
+        └─→ Stage 2: Query Expansion
+              → LLM generates N alternative phrasings (synonyms)
+              → Embed each variant → search → deduplicate by chunk ID
+              → Merge & re-sort by score
+              → Early-stop when enough unique chunks
+      │
+      → If loose_prompt_enabled=True (Stage 3):
+        ├─ Context exists → SYSTEM_PROMPT_LOOSE
+        ├─ No context → SYSTEM_PROMPT_GENERAL
+        └─ Context + strict → SYSTEM_PROMPT (original)
+      │
+      → LLM API (with own cache)
+      → Store in both caches
+      → return Answer (or stream via SSE)
 ```
 
 ### Scheduler Flow
