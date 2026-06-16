@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="200" viewBox="0 0 800 200">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d1117;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#161b22;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#58a6ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1f6feb;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="techGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f0883e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e05d26;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="techGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4479a1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2b5b8a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="techGrad3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2496ed;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0d8bdb;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="techGrad4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4c8dbf;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2d6a9f;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="200" fill="url(#bgGrad)" rx="8"/>
+  
+  <!-- Border -->
+  <rect x="1" y="1" width="798" height="198" fill="none" stroke="#30363d" stroke-width="1" rx="8"/>
+  
+  <!-- Accent line -->
+  <rect x="0" y="0" width="800" height="4" fill="url(#accentGrad)" rx="2"/>
+
+  <!-- Main Title -->
+  <text x="400" y="52" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="28" font-weight="bold" fill="#f0f6fc" text-anchor="middle" letter-spacing="1">
+    MR-RAG
+  </text>
+  
+  <!-- Subtitle -->
+  <text x="400" y="80" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="14" fill="#8b949e" text-anchor="middle" letter-spacing="0.5">
+    Production-Ready Retrieval-Augmented Generation System
+  </text>
+
+  <!-- Tech Stack Labels -->
+  <!-- Row 1: Python -->
+  <rect x="50" y="108" width="110" height="32" rx="16" fill="url(#techGrad1)" opacity="0.9"/>
+  <text x="105" y="129" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">
+    Python 3.13
+  </text>
+
+  <!-- Row 1: FastAPI -->
+  <rect x="175" y="108" width="90" height="32" rx="16" fill="url(#techGrad2)" opacity="0.9"/>
+  <text x="220" y="129" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">
+    FastAPI
+  </text>
+
+  <!-- Row 1: ChromaDB -->
+  <rect x="280" y="108" width="100" height="32" rx="16" fill="url(#techGrad3)" opacity="0.9"/>
+  <text x="330" y="129" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">
+    ChromaDB
+  </text>
+
+  <!-- Row 1: OpenRouter -->
+  <rect x="395" y="108" width="115" height="32" rx="16" fill="url(#techGrad4)" opacity="0.9"/>
+  <text x="452.5" y="129" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">
+    OpenRouter
+  </text>
+
+  <!-- Row 2: LangChain -->
+  <rect x="120" y="152" width="105" height="32" rx="16" fill="#1f2937" stroke="#30363d" stroke-width="1"/>
+  <text x="172.5" y="173" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#e6edf3" text-anchor="middle">
+    LangChain
+  </text>
+
+  <!-- Row 2: Docker -->
+  <rect x="240" y="152" width="90" height="32" rx="16" fill="#1f2937" stroke="#30363d" stroke-width="1"/>
+  <text x="285" y="173" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#e6edf3" text-anchor="middle">
+    Docker
+  </text>
+
+  <!-- Row 2: UV -->
+  <rect x="345" y="152" width="70" height="32" rx="16" fill="#1f2937" stroke="#30363d" stroke-width="1"/>
+  <text x="380" y="173" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#e6edf3" text-anchor="middle">
+    UV
+  </text>
+
+  <!-- Row 2: Streaming -->
+  <rect x="430" y="152" width="100" height="32" rx="16" fill="#1f2937" stroke="#30363d" stroke-width="1"/>
+  <text x="480" y="173" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#e6edf3" text-anchor="middle">
+    Streaming
+  </text>
+
+  <!-- Decorative dots -->
+  <circle cx="760" cy="30" r="3" fill="#58a6ff" opacity="0.6"/>
+  <circle cx="760" cy="45" r="2" fill="#58a6ff" opacity="0.3"/>
+  <circle cx="40" cy="30" r="3" fill="#58a6ff" opacity="0.6"/>
+  <circle cx="40" cy="45" r="2" fill="#58a6ff" opacity="0.3"/>
+
+</svg>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./banner.svg" width="100%" style="max-width: 1024px" />
+</p>
+
 # Features Overview
 
 ## click for [QUICK START](./USAGE.md)
