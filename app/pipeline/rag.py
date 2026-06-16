@@ -14,7 +14,11 @@ Three-stage cascading retrieval (controlled by settings flags):
 
 import json
 import logging
-from typing import AsyncGenerator, List
+from dataclasses import dataclass, field
+from typing import AsyncGenerator, List, cast
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 
 from app.config import settings
 from app.core.domain import Answer, Message, SearchResult
@@ -23,7 +27,11 @@ from app.core.ports import CachePort, EmbeddingPort, LLMPort, VectorStorePort
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = (
+# ---------------------------------------------------------------------------
+# LangChain Prompt Templates
+# ---------------------------------------------------------------------------
+
+SYSTEM_PROMPT_STRICT = (
     "You are a helpful assistant that answers questions based on the provided context. "
     "Use only the information from the context to answer. "
     "If the context doesn't contain enough information, say so clearly."
@@ -38,12 +46,105 @@ SYSTEM_PROMPT_LOOSE = (
 
 SYSTEM_PROMPT_GENERAL = "You are a helpful assistant. Answer the user's question based on your general knowledge."
 
-QUERY_EXPANSION_PROMPT = (
+QUERY_EXPANSION_PROMPT_TEMPLATE = (
     "Rewrite the following question in {count} different ways. "
     "Use synonyms, rephrase the structure, and vary the wording to cover "
     "alternative phrasings of the same question. "
     "Output one variant per line, with no numbering, no bullet points, and no extra text."
 )
+
+STRICT_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_STRICT),
+        (
+            "human",
+            "Context:\n{context}\n\nQuestion: {question}\n\n"
+            "Answer based only on the context above:",
+        ),
+    ]
+)
+
+LOOSE_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_LOOSE),
+        (
+            "human",
+            "Context:\n{context}\n\nQuestion: {question}\n\n"
+            "Use the context as your primary source, but you may supplement "
+            "with your own knowledge if it is insufficient. Clearly indicate "
+            "which parts come from the context and which from your knowledge.",
+        ),
+    ]
+)
+
+GENERAL_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_GENERAL),
+        ("human", "Question: {question}"),
+    ]
+)
+
+NO_CONTEXT_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_STRICT),
+        (
+            "human",
+            "Question: {question}\n\n"
+            "No specific context was retrieved for this question.",
+        ),
+    ]
+)
+
+QUERY_EXPANSION_CHAT = ChatPromptTemplate.from_messages(
+    [
+        ("system", QUERY_EXPANSION_PROMPT_TEMPLATE),
+        ("human", "{question}"),
+    ]
+)
+
+_output_parser = StrOutputParser()
+
+# ---------------------------------------------------------------------------
+# Role mapper: LangChain message types → OpenAI API role names
+# ---------------------------------------------------------------------------
+_ROLE_MAP: dict[str, str] = {
+    "human": "user",
+    "ai": "assistant",
+    "system": "system",
+}
+
+
+def _map_messages(formatted: list) -> list:
+    """Convert LangChain formatted messages to domain Message objects with correct roles."""
+    result: list = []
+    for msg in formatted:
+        msg_type: str = cast(str, msg.type) if msg.type is not None else "user"
+        role: str = _ROLE_MAP.get(msg_type, msg_type)
+        content: str = str(msg.content) if msg.content is not None else ""
+        result.append(Message(role=role, content=content))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Shared context for the RAG pipeline
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _RAGContext:
+    """
+    Carries all intermediate state produced by the shared RAG preparation phase.
+
+    Both `answer()` and `answer_stream()` consume this context and only differ
+    in how they run the final LLM generation (sync vs streaming).
+    """
+
+    messages: list = field(default_factory=list)
+    results: list[SearchResult] = field(default_factory=list)
+    query_embedding: list[float] = field(default_factory=list)
+    question: str = ""
+    is_fallback_answer: bool = False
+    fallback_answer_text: str = ""
 
 
 class RAGPipeline:
@@ -103,144 +204,21 @@ class RAGPipeline:
         """
         logger.info("Processing question: %s", question[:100])
 
-        # Layer 1: Try exact-match cache first (fastest — no embedding needed)
-        if self._cache is not None:
-            llm_string = json.dumps(
-                {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
-            )
-            cached = self._cache.lookup(question, llm_string)
-            if cached is not None:
-                logger.info(
-                    "RAG cache (exact) HIT — returning cached answer immediately"
-                )
-                try:
-                    data = json.loads(cached)
-                    return Answer(text=data["text"], sources=[])
-                except (json.JSONDecodeError, KeyError):
-                    logger.warning("RAG cache entry malformed, re-running pipeline")
+        ctx = self._prepare_rag(question)
+        if ctx.is_fallback_answer:
+            return Answer(text=ctx.fallback_answer_text, sources=[])
 
-        # Step 1: Embed the question
+        # Generate answer via blocking LLM call
         try:
-            query_embedding = self._embedding.embed_query(question)
-        except Exception as e:
-            logger.error("Failed to embed query: %s", str(e))
-            raise RetrievalError(f"Failed to embed query: {e}") from e
-
-        # Layer 2: Try semantic cache (embedding similarity)
-        if self._cache is not None and settings.cache_semantic_enabled:
-            cached = self._cache.lookup_semantic(
-                query_embedding, settings.cache_semantic_threshold
-            )
-            if cached is not None:
-                logger.info("RAG cache (semantic) HIT — returning cached answer")
-                try:
-                    data = json.loads(cached)
-                    return Answer(text=data["text"], sources=[])
-                except (json.JSONDecodeError, KeyError):
-                    logger.warning(
-                        "Semantic cache entry malformed, re-running pipeline"
-                    )
-
-        # ------------------------------------------------------------------
-        # Stage 1 — Normal retrieval
-        # ------------------------------------------------------------------
-        # If any cascade stage is enabled, don't fall back to low-score chunks
-        # in Stage 1 — let the cascade handle it.
-        use_cascade = settings.query_expansion_enabled or settings.loose_prompt_enabled
-        results = self._search(
-            query_embedding, allow_low_score_fallback=not use_cascade
-        )
-        use_loose_prompt = False
-
-        # Cascade trigger: empty results OR low-relevance results
-        needs_expansion = not results or (
-            use_cascade and results and self._is_low_relevance(results)
-        )
-
-        # If query expansion is enabled and cascade is needed → Stage 2
-        if needs_expansion and settings.query_expansion_enabled:
-            logger.info(
-                "Stage 1 results low-relevance — trying query expansion (Stage 2)"
-            )
-            results = self._search_with_expansion(question)
-
-        # If loose prompt is enabled → Stage 3 (regardless of Stage 2 outcome)
-        if settings.loose_prompt_enabled:
-            logger.info("Loose prompt enabled — relaxing system prompt (Stage 3)")
-            use_loose_prompt = True
-
-        if not results and not use_loose_prompt:
-            logger.warning("No relevant documents found for question")
-            answer = Answer(
-                text="I couldn't find any relevant information to answer your question.",
-                sources=[],
-            )
-            # Cache the "no results" answer too
-            if self._cache is not None:
-                llm_string = json.dumps(
-                    {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
-                )
-                self._cache.update(
-                    question, llm_string, json.dumps({"text": answer.text})
-                )
-            return answer
-
-        # Build context from retrieved chunks (may be empty for Stage 3)
-        context = self._build_context(results) if results else ""
-
-        # Generate answer using LLM
-        try:
-            if context and not use_loose_prompt:
-                # Strict mode: answer based only on context
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Answer based only on the context above:"
-                )
-                system_prompt = SYSTEM_PROMPT
-            elif context and use_loose_prompt:
-                # Loose mode with context: use context as primary source, supplement with own knowledge
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Use the context as your primary source, but you may supplement "
-                    f"with your own knowledge if it is insufficient. Clearly indicate "
-                    f"which parts come from the context and which from your knowledge."
-                )
-                system_prompt = SYSTEM_PROMPT_LOOSE
-            elif not context and use_loose_prompt:
-                # No context at all: answer from general knowledge
-                user_content = f"Question: {question}"
-                system_prompt = SYSTEM_PROMPT_GENERAL
-            else:
-                # No context and no loose prompt: can't answer
-                user_content = (
-                    f"Question: {question}\n\n"
-                    f"No specific context was retrieved for this question."
-                )
-                system_prompt = SYSTEM_PROMPT
-
-            messages = [
-                Message(role="system", content=system_prompt),
-                Message(role="user", content=user_content),
-            ]
-            answer_text = self._llm.generate(messages)
+            answer_text = self._llm.generate(ctx.messages)
         except Exception as e:
             logger.error("LLM generation failed: %s", str(e))
             raise RetrievalError(f"Failed to generate answer: {e}") from e
 
-        answer = Answer(text=answer_text, sources=results or [])
+        answer = Answer(text=answer_text, sources=ctx.results)
 
-        # Store full answer in cache for future identical questions
-        if self._cache is not None:
-            llm_string = json.dumps(
-                {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
-            )
-            self._cache.update(question, llm_string, json.dumps({"text": answer_text}))
-            # Also store in semantic cache for similar future questions
-            if settings.cache_semantic_enabled:
-                self._cache.update_semantic(
-                    query_embedding, json.dumps({"text": answer_text})
-                )
-            logger.info("RAG cache UPDATED")
+        # Store full answer in cache
+        self._update_caches(question, ctx.query_embedding, answer_text)
 
         return answer
 
@@ -263,47 +241,101 @@ class RAGPipeline:
         """
         logger.info("Processing streaming question: %s", question[:100])
 
-        # Layer 1: Try exact-match cache first
+        ctx = self._prepare_rag(question)
+        if ctx.is_fallback_answer:
+            yield ctx.fallback_answer_text
+            return
+
+        # Stream answer from LLM
+        try:
+            answer_parts: List[str] = []
+            async for token in self._llm.generate_stream(ctx.messages):
+                answer_parts.append(token)
+                yield token
+        except Exception as e:
+            logger.error("LLM streaming failed: %s", str(e))
+            raise RetrievalError(f"Failed to generate answer: {e}") from e
+
+        # Store full answer in cache
+        full_answer = "".join(answer_parts)
+        if full_answer:
+            self._update_caches(question, ctx.query_embedding, full_answer)
+
+    # ------------------------------------------------------------------
+    # Shared RAG preparation (common to both answer and answer_stream)
+    # ------------------------------------------------------------------
+
+    def _prepare_rag(self, question: str) -> _RAGContext:
+        """
+        Execute the shared portion of the RAG pipeline:
+          cache checks → embedding → retrieval → cascade → prompt building.
+
+        This method is used by both `answer()` and `answer_stream()` to
+        avoid code duplication. After calling this, each method only needs
+        to run the LLM generation (sync or streaming) and cache the result.
+
+        Args:
+            question: The user's question.
+
+        Returns:
+            A _RAGContext containing the built messages, retrieval results,
+            query embedding, and any fallback answer if no retrieval is possible.
+        """
+        ctx = _RAGContext(question=question)
+
+        # ------------------------------------------------------------------
+        # Layer 1: Try exact-match cache first (fastest — no embedding needed)
+        # ------------------------------------------------------------------
         if self._cache is not None:
             llm_string = json.dumps(
                 {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
             )
             cached = self._cache.lookup(question, llm_string)
             if cached is not None:
-                logger.info("RAG streaming cache (exact) HIT")
+                logger.info(
+                    "RAG cache (exact) HIT — returning cached answer immediately"
+                )
                 try:
                     data = json.loads(cached)
-                    yield data["text"]
-                    return
+                    ctx.is_fallback_answer = True
+                    ctx.fallback_answer_text = data["text"]
+                    return ctx
                 except (json.JSONDecodeError, KeyError):
-                    logger.warning("Cache entry malformed, re-running pipeline")
+                    logger.warning("RAG cache entry malformed, re-running pipeline")
 
+        # ------------------------------------------------------------------
         # Step 1: Embed the question
+        # ------------------------------------------------------------------
         try:
             query_embedding = self._embedding.embed_query(question)
         except Exception as e:
             logger.error("Failed to embed query: %s", str(e))
             raise RetrievalError(f"Failed to embed query: {e}") from e
 
-        # Layer 2: Try semantic cache
+        ctx.query_embedding = query_embedding
+
+        # ------------------------------------------------------------------
+        # Layer 2: Try semantic cache (embedding similarity)
+        # ------------------------------------------------------------------
         if self._cache is not None and settings.cache_semantic_enabled:
             cached = self._cache.lookup_semantic(
                 query_embedding, settings.cache_semantic_threshold
             )
             if cached is not None:
-                logger.info("RAG streaming cache (semantic) HIT")
+                logger.info("RAG cache (semantic) HIT — returning cached answer")
                 try:
                     data = json.loads(cached)
-                    yield data["text"]
-                    return
+                    ctx.is_fallback_answer = True
+                    ctx.fallback_answer_text = data["text"]
+                    return ctx
                 except (json.JSONDecodeError, KeyError):
-                    logger.warning("Semantic cache entry malformed, re-running")
+                    logger.warning(
+                        "Semantic cache entry malformed, re-running pipeline"
+                    )
 
         # ------------------------------------------------------------------
         # Stage 1 — Normal retrieval
         # ------------------------------------------------------------------
-        # If any cascade stage is enabled, don't fall back to low-score chunks
-        # in Stage 1 — let the cascade handle it.
         use_cascade = settings.query_expansion_enabled or settings.loose_prompt_enabled
         results = self._search(
             query_embedding, allow_low_score_fallback=not use_cascade
@@ -315,81 +347,85 @@ class RAGPipeline:
             use_cascade and results and self._is_low_relevance(results)
         )
 
-        # If query expansion is enabled and cascade is needed → Stage 2
+        # Stage 2 — Query expansion
         if needs_expansion and settings.query_expansion_enabled:
             logger.info(
                 "Stage 1 results low-relevance — trying query expansion (Stage 2)"
             )
             results = self._search_with_expansion(question)
 
-        # If loose prompt is enabled → Stage 3 (regardless of Stage 2 outcome)
+        # Stage 3 — Loose prompt
         if settings.loose_prompt_enabled:
             logger.info("Loose prompt enabled — relaxing system prompt (Stage 3)")
             use_loose_prompt = True
 
+        # Handle no results
         if not results and not use_loose_prompt:
             logger.warning("No relevant documents found for question")
-            yield "I couldn't find any relevant information to answer your question."
-            return
+            fallback_text = (
+                "I couldn't find any relevant information to answer your question."
+            )
+            ctx.is_fallback_answer = True
+            ctx.fallback_answer_text = fallback_text
+            # Cache the "no results" answer too
+            if self._cache is not None:
+                llm_string = json.dumps(
+                    {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
+                )
+                self._cache.update(
+                    question, llm_string, json.dumps({"text": fallback_text})
+                )
+            return ctx
+
+        ctx.results = results
 
         # Build context from retrieved chunks (may be empty for Stage 3)
         context = self._build_context(results) if results else ""
 
-        # Stream answer from LLM
+        # Select the appropriate prompt template and build messages
         try:
             if context and not use_loose_prompt:
-                # Strict mode: answer based only on context
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Answer based only on the context above:"
+                formatted = STRICT_PROMPT.format_messages(
+                    context=context, question=question
                 )
-                system_prompt = SYSTEM_PROMPT
             elif context and use_loose_prompt:
-                # Loose mode with context: use context as primary source, supplement with own knowledge
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Use the context as your primary source, but you may supplement "
-                    f"with your own knowledge if it is insufficient. Clearly indicate "
-                    f"which parts come from the context and which from your knowledge."
+                formatted = LOOSE_PROMPT.format_messages(
+                    context=context, question=question
                 )
-                system_prompt = SYSTEM_PROMPT_LOOSE
             elif not context and use_loose_prompt:
-                # No context at all: answer from general knowledge
-                user_content = f"Question: {question}"
-                system_prompt = SYSTEM_PROMPT_GENERAL
+                formatted = GENERAL_PROMPT.format_messages(question=question)
             else:
-                # No context and no loose prompt: can't answer
-                user_content = (
-                    f"Question: {question}\n\n"
-                    f"No specific context was retrieved for this question."
-                )
-                system_prompt = SYSTEM_PROMPT
+                formatted = NO_CONTEXT_PROMPT.format_messages(question=question)
 
-            messages = [
-                Message(role="system", content=system_prompt),
-                Message(role="user", content=user_content),
-            ]
-
-            answer_parts: List[str] = []
-            async for token in self._llm.generate_stream(messages):
-                answer_parts.append(token)
-                yield token
+            ctx.messages = _map_messages(formatted)
         except Exception as e:
-            logger.error("LLM streaming failed: %s", str(e))
-            raise RetrievalError(f"Failed to generate answer: {e}") from e
+            logger.error("Failed to build prompt: %s", str(e))
+            raise RetrievalError(f"Failed to build prompt: {e}") from e
 
-        # Store full answer in cache
-        full_answer = "".join(answer_parts)
-        if self._cache is not None and full_answer:
-            llm_string = json.dumps(
-                {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
+        return ctx
+
+    # ------------------------------------------------------------------
+    # Cache update helper
+    # ------------------------------------------------------------------
+
+    def _update_caches(
+        self, question: str, query_embedding: list[float], answer_text: str
+    ) -> None:
+        """Store the generated answer in both exact-match and semantic caches."""
+        if self._cache is None:
+            return
+
+        llm_string = json.dumps(
+            {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
+        )
+        self._cache.update(question, llm_string, json.dumps({"text": answer_text}))
+
+        if settings.cache_semantic_enabled:
+            self._cache.update_semantic(
+                query_embedding, json.dumps({"text": answer_text})
             )
-            self._cache.update(question, llm_string, json.dumps({"text": full_answer}))
-            if settings.cache_semantic_enabled:
-                self._cache.update_semantic(
-                    query_embedding, json.dumps({"text": full_answer})
-                )
-            logger.info("RAG streaming cache UPDATED")
+
+        logger.info("RAG cache UPDATED")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -410,7 +446,9 @@ class RAGPipeline:
         return avg_score < 0.30
 
     def _search(
-        self, query_embedding: List[float], allow_low_score_fallback: bool = True
+        self,
+        query_embedding: List[float],
+        allow_low_score_fallback: bool = True,
     ) -> List[SearchResult]:
         """
         Run a single search against the vector store and filter results.
@@ -437,7 +475,6 @@ class RAGPipeline:
         if not results:
             return []
 
-        # Filter out low-relevance chunks to save tokens
         min_score = settings.retrieval_min_score
         if min_score > 0:
             filtered = [r for r in results if r.score >= min_score]
@@ -468,6 +505,8 @@ class RAGPipeline:
         """
         Use the LLM to generate alternative phrasings of the user's question.
 
+        Uses LangChain's ChatPromptTemplate for structured prompt formatting.
+
         Returns:
             A list of alternative question strings (including the original).
         """
@@ -475,11 +514,10 @@ class RAGPipeline:
         if count < 1:
             return [question]
 
-        prompt = QUERY_EXPANSION_PROMPT.format(count=count)
-        messages = [
-            Message(role="system", content=prompt),
-            Message(role="user", content=question),
-        ]
+        formatted = QUERY_EXPANSION_CHAT.format_messages(
+            count=str(count), question=question
+        )
+        messages = _map_messages(formatted)
 
         try:
             raw = self._llm.generate(messages, temperature=0.7, max_tokens=512)
@@ -489,10 +527,7 @@ class RAGPipeline:
             )
             return [question]
 
-        # Parse lines, strip whitespace, remove empty lines
         variants = [line.strip() for line in raw.splitlines() if line.strip()]
-
-        # Limit to requested count, add original question at the front
         all_queries = [question] + variants[:count]
         logger.info(
             "Query expansion generated %d variant(s): %s",
@@ -538,7 +573,6 @@ class RAGPipeline:
                     seen_ids.add(result.chunk.id)
                     merged.append(result)
 
-            # Early stop: if we already have enough results, break
             if len(merged) >= settings.top_k:
                 logger.info(
                     "Collected %d unique chunks from expansion, stopping early",
@@ -550,10 +584,8 @@ class RAGPipeline:
             logger.warning("Query expansion returned no results either")
             return []
 
-        # Re-sort by score descending (highest relevance first)
         merged.sort(key=lambda r: r.score, reverse=True)
 
-        # Apply the same min_score filter but keep top_k max
         min_score = settings.retrieval_min_score
         if min_score > 0:
             filtered = [r for r in merged if r.score >= min_score]
@@ -564,7 +596,8 @@ class RAGPipeline:
         logger.info("Merged %d unique chunks from query expansion", len(merged))
         return merged
 
-    def _build_context(self, results: List[SearchResult]) -> str:
+    @staticmethod
+    def _build_context(results: List[SearchResult]) -> str:
         """Build a context string from retrieved search results."""
         context_parts = []
         for i, result in enumerate(results, 1):

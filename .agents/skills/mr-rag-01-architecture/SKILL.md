@@ -65,15 +65,31 @@ Use this skill when working on project structure, adding new modules, refactorin
 ## Layer Rules
 
 - Core Layer: Zero external dependencies, pure Python only
-- Infrastructure Layer: Depends only on Core, implements Ports
+- Infrastructure Layer: Depends only on Core, implements Ports. Uses LangChain components internally (wrapped behind Port interfaces).
 - Pipeline Layer: Depends only on Core, uses Port interfaces
 - API Layer: Thin handlers, translates domain exceptions to HTTP
 - Scheduler Layer: Self-contained cron job, calls IngestionPipeline
+
+## LangChain Usage in Infrastructure
+
+Infrastructure adapters wrap LangChain components behind clean Port interfaces:
+
+| Infrastructure File | LangChain Component |
+|--------------------|---------------------|
+| `document_loader.py` | `JSONLoader`, `TextLoader`, `MarkdownHeaderTextSplitter` |
+| `text_splitter.py` | `RecursiveCharacterTextSplitter` |
+| `cache.py` | `InMemoryCache`, `SQLiteCache` |
+| `chroma_vector_store.py` | `langchain_chroma.Chroma` |
+
+This keeps the hexagonal architecture intact — Pipelines depend only on Ports, while the LangChain integration stays in the Infrastructure layer.
 
 ## Should / Should Not
 
 ✅ Do: Use `from app.core.ports import X` in Pipeline and Infrastructure
 ✅ Do: Use `from app.core.domain import X` everywhere
+✅ Do: Wrap LangChain components behind Port interfaces
+✅ Do: Keep LangChain dependencies in Infrastructure layer only
 ❌ Don't: Import Infrastructure from Pipeline
 ❌ Don't: Import API from Pipeline
 ❌ Don't: Put business logic in route handlers
+❌ Don't: Import LangChain directly in Pipeline or Core layers

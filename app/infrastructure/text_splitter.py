@@ -51,11 +51,11 @@ class LangChainTextSplitter(TextSplitterPort):
         if not documents:
             return []
 
+        from langchain_core.documents import Document as LangChainDocument
+
         # Convert domain Documents to LangChain Documents for splitting
         lc_docs = [
-            __import__("langchain_core.documents", fromlist=["Document"]).Document(
-                page_content=doc.content, metadata=doc.metadata
-            )
+            LangChainDocument(page_content=doc.content, metadata=doc.metadata)
             for doc in documents
         ]
 

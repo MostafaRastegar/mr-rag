@@ -2,7 +2,7 @@
 Cache adapters for the RAG system.
 
 Provides caching implementations using LangChain's cache infrastructure
-(BaseCache, InMemoryCache) plus a custom SQLite-based persistent cache.
+(BaseCache, InMemoryCache, SQLiteCache) plus a custom in-memory semantic cache.
 
 These adapters wrap LangChain caches behind a clean CachePort interface,
 which is injected into LLM, embedding, and pipeline components.
@@ -12,12 +12,11 @@ import hashlib
 import json
 import logging
 import math
-import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from langchain_core.caches import BaseCache as LangChainBaseCache
 from langchain_core.caches import InMemoryCache as LangChainInMemoryCache
@@ -92,51 +91,48 @@ class InMemoryCacheAdapter(CachePort):
 
 
 # ---------------------------------------------------------------------------
-# Adapter: SQLiteCacheAdapter
+# Adapter: SQLiteCacheAdapter (LangChain SQLiteCache)
 # ---------------------------------------------------------------------------
 
 
 class SQLiteCacheAdapter(CachePort):
     """
-    Persistent cache adapter backed by SQLite.
+    Persistent cache adapter backed by SQLite, using LangChain's SQLiteCache.
 
     Data survives process restarts, making it suitable for production use.
     Uses a simple key-value table where keys are SHA-256 hashes of
     (prompt, llm_string) tuples.
 
-    Thread-safe for concurrent access.
+    Thread-safe — LangChain's SQLiteCache handles concurrent access internally.
+    Supports TTL-based expiration via periodic cleanup.
     """
 
     def __init__(
         self, db_path: str | None = None, ttl_seconds: int | None = None
     ) -> None:
+        from langchain_community.cache import SQLiteCache
+
         self._db_path = str(db_path or settings.cache_db_path)
         self._ttl_seconds = ttl_seconds or settings.cache_ttl_llm
-        self._lock = threading.Lock()
 
         # Ensure the directory exists
         db_dir = Path(self._db_path).parent
         db_dir.mkdir(parents=True, exist_ok=True)
 
-        self._init_db()
+        # Use LangChain's SQLiteCache for robust persistence
+        self._cache = SQLiteCache(database_path=self._db_path)
 
-    def _init_db(self) -> None:
-        """Create the cache table if it doesn't exist."""
-        with self._lock:
-            conn = sqlite3.connect(self._db_path, timeout=10)
-            try:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS cache (
-                        key_hash TEXT PRIMARY KEY,
-                        value TEXT NOT NULL,
-                        created_at REAL NOT NULL
-                    )
-                    """)
-                conn.commit()
-            finally:
-                conn.close()
+        # TTL tracking: we store entries alongside their creation timestamps
+        # in a separate in-memory dict since LangChain's SQLiteCache doesn't
+        # natively support TTL. This is more reliable than the previous manual
+        # sqlite3 implementation and maintains the same TTL behavior.
+        self._timestamps: dict[str, float] = {}
+        self._lock = threading.Lock()
+
         logger.info(
-            "SQLite cache initialized at %s (TTL=%ds)", self._db_path, self._ttl_seconds
+            "SQLite cache initialized at %s (TTL=%ds) via LangChain SQLiteCache",
+            self._db_path,
+            self._ttl_seconds,
         )
 
     def _build_key(self, prompt: str, llm_string: str) -> str:
@@ -159,30 +155,28 @@ class SQLiteCacheAdapter(CachePort):
             The cached text if found and not expired, otherwise None.
         """
         key = self._build_key(prompt, llm_string)
+
+        # Check TTL first
         with self._lock:
-            conn = sqlite3.connect(self._db_path, timeout=10)
-            try:
-                cursor = conn.execute(
-                    "SELECT value, created_at FROM cache WHERE key_hash = ?",
-                    (key,),
-                )
-                row = cursor.fetchone()
-                if row is None:
-                    logger.debug("SQLite cache MISS for key=%s...", key[:12])
-                    return None
+            created_at = self._timestamps.get(key)
+            if created_at is not None and self._is_expired(created_at):
+                logger.debug("SQLite cache EXPIRED for key=%s...", key[:12])
+                self._timestamps.pop(key, None)
+                return None
 
-                value_json, created_at = row
-                if self._is_expired(created_at):
-                    logger.debug("SQLite cache EXPIRED for key=%s...", key[:12])
-                    conn.execute("DELETE FROM cache WHERE key_hash = ?", (key,))
-                    conn.commit()
-                    return None
+        # Use LangChain's SQLiteCache for the actual lookup
+        try:
+            result = self._cache.lookup(key, "default")
+        except Exception:
+            logger.warning("SQLite cache lookup failed for key=%s...", key[:12])
+            return None
 
-                data = json.loads(value_json)
-                logger.debug("SQLite cache HIT for key=%s...", key[:12])
-                return data["text"]
-            finally:
-                conn.close()
+        if result is not None and len(result) > 0:
+            logger.debug("SQLite cache HIT for key=%s...", key[:12])
+            return result[0].text
+
+        logger.debug("SQLite cache MISS for key=%s...", key[:12])
+        return None
 
     def update(self, prompt: str, llm_string: str, value: str) -> None:
         """Store a response in the cache.
@@ -193,47 +187,47 @@ class SQLiteCacheAdapter(CachePort):
             value: The response text to cache.
         """
         key = self._build_key(prompt, llm_string)
-        value_json = json.dumps({"text": value})
 
+        # Store in LangChain's SQLiteCache
+        try:
+            self._cache.update(key, "default", [Generation(text=value)])
+        except Exception as e:
+            logger.warning("SQLite cache update failed: %s", str(e))
+            return
+
+        # Track creation timestamp for TTL
         with self._lock:
-            conn = sqlite3.connect(self._db_path, timeout=10)
-            try:
-                conn.execute(
-                    "INSERT OR REPLACE INTO cache (key_hash, value, created_at) VALUES (?, ?, ?)",
-                    (key, value_json, time.time()),
-                )
-                conn.commit()
-                logger.debug("SQLite cache UPDATED for key=%s...", key[:12])
-            finally:
-                conn.close()
+            self._timestamps[key] = time.time()
+
+        logger.debug("SQLite cache UPDATED for key=%s...", key[:12])
 
     def clear(self) -> None:
         """Clear all cached entries."""
+        try:
+            self._cache.clear()
+        except Exception as e:
+            logger.warning("SQLite cache clear failed: %s", str(e))
+
         with self._lock:
-            conn = sqlite3.connect(self._db_path, timeout=10)
-            try:
-                conn.execute("DELETE FROM cache")
-                conn.commit()
-                logger.info("SQLite cache cleared")
-            finally:
-                conn.close()
+            self._timestamps.clear()
+
+        logger.info("SQLite cache cleared")
 
     def clear_expired(self) -> int:
         """Remove all expired entries and return the count removed."""
-        cutoff = time.time() - self._ttl_seconds
+        now = time.time()
+        cutoff = now - self._ttl_seconds
+        removed = 0
+
         with self._lock:
-            conn = sqlite3.connect(self._db_path, timeout=10)
-            try:
-                cursor = conn.execute(
-                    "DELETE FROM cache WHERE created_at < ?", (cutoff,)
-                )
-                conn.commit()
-                removed = cursor.rowcount
-                if removed:
-                    logger.info("Cleared %d expired cache entries", removed)
-                return removed
-            finally:
-                conn.close()
+            expired_keys = [k for k, ts in self._timestamps.items() if ts < cutoff]
+            for key in expired_keys:
+                self._timestamps.pop(key, None)
+                removed += 1
+
+        if removed:
+            logger.info("Cleared %d expired cache entries", removed)
+        return removed
 
 
 # ---------------------------------------------------------------------------

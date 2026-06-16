@@ -42,8 +42,14 @@ Question
 | Adapter | Backend | Persistence |
 |---------|---------|-------------|
 | `InMemoryCacheAdapter` | LangChain InMemoryCache | Ephemeral (lost on restart) |
-| `SQLiteCacheAdapter` | SQLite file | Persistent across restarts |
+| `SQLiteCacheAdapter` | LangChain SQLiteCache (SQLite file) | Persistent across restarts |
 | `SemanticCacheAdapter` | In-memory hybrid (exact + semantic) | Ephemeral |
+
+## LangChain Integration
+
+- `InMemoryCacheAdapter` wraps `langchain_core.caches.InMemoryCache`
+- `SQLiteCacheAdapter` wraps `langchain_community.cache.SQLiteCache` — eliminates custom sqlite3 code
+- `SemanticCacheAdapter` uses LangChain's `InMemoryCache` for the exact-match sub-layer
 
 ## Cache Usage Pattern (in RAGPipeline)
 

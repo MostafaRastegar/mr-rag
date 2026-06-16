@@ -11,8 +11,8 @@ Use this skill when modifying the ingestion pipeline, adding a new document sour
 
 ## Steps
 
-1. Load documents from source using `DocumentLoaderPort`
-2. Split documents into chunks using `TextSplitterPort`
+1. Load documents from source using `DocumentLoaderPort` (LangChain-based adapters)
+2. Split documents into chunks using `TextSplitterPort` (LangChain RecursiveCharacterTextSplitter)
 3. Generate embeddings for each chunk using `EmbeddingPort`
 4. Validate that embedding count matches chunk count
 5. Store chunks with embeddings in `VectorStorePort`
@@ -20,15 +20,26 @@ Use this skill when modifying the ingestion pipeline, adding a new document sour
 ## Pipeline Flow
 
 ```
-JSON File → JsonDocumentLoader.load()
+JSON File → JsonDocumentLoader (LangChain JSONLoader with jq schema)
          → List[Document]
-         → LangChainTextSplitter.split()
+         → LangChainTextSplitter.split() (RecursiveCharacterTextSplitter)
          → List[Chunk]
          → OpenRouterEmbedding.embed_documents()
          → List[List[float]]
          → ChromaVectorStore.add()
          → int (count)
 ```
+
+## Document Loaders (LangChain-based)
+
+All document loaders implement `DocumentLoaderPort` and use LangChain internally:
+
+| Loader | LangChain Component | File Format |
+|--------|-------------------|-------------|
+| `JsonDocumentLoader` | `JSONLoader` with jq schema + `metadata_func` | `.json` |
+| `MarkdownDocumentLoader` | `MarkdownHeaderTextSplitter` (heading hierarchy) | `.md` |
+| `TextDocumentLoader` | `TextLoader` | `.txt` |
+| `AutoDocumentLoader` | Composite — dispatches by extension | auto-detect |
 
 ## Code Structure
 
@@ -70,12 +81,20 @@ except Exception as e:
     raise IngestionError(f"Failed to generate embeddings: {e}") from e
 ```
 
+## LangChain Priority Rule
+
+When adding a new document loader:
+1. First check if LangChain provides a suitable loader (`langchain_community.document_loaders`)
+2. If found, wrap it behind `DocumentLoaderPort` and convert results to domain models
+3. Only write custom parsing if no LangChain loader exists
+
 ## Should / Should Not
 
 ✅ Do: Validate embedding count matches chunk count before storing
 ✅ Do: Log progress at each stage
 ✅ Do: Return early with 0 for empty documents/chunks
 ✅ Do: Use try/except around each stage independently
+✅ Do: Prefer LangChain loaders over custom file parsing
 ❌ Don't: Add file-format-specific logic in the pipeline
 ❌ Don't: Skip validation — always check counts match
 ❌ Don't: Catch exceptions silently — always log and re-raise

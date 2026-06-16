@@ -1,7 +1,7 @@
 # Active Context
 
 ## Current Focus
-**Synonym Handling** — Three-stage cascading retrieval added (Query Expansion + Loose Prompt)
+**Multi-format document loading + UUID chunk IDs** — AutoDocumentLoader added (JSON, Markdown, Plain Text), UUID-based chunk IDs implemented
 
 ## What Has Been Built
 
@@ -12,8 +12,15 @@
 - [x] Direct HTTP OpenRouter API (no LangChain coupling)
 - [x] LangChain RecursiveCharacterTextSplitter for chunking
 
+### Document Loading (Multi-Format)
+- [x] `AutoDocumentLoader` — dispatches by file extension
+- [x] `JsonDocumentLoader` — LangChain JSONLoader with jq schema
+- [x] `MarkdownDocumentLoader` — LangChain MarkdownHeaderTextSplitter (splits by headings)
+- [x] `TextDocumentLoader` — LangChain TextLoader
+- [x] Supported formats: `.json`, `.md`, `.txt`
+
 ### Caching (LangChain-based)
-- [x] `InMemoryCacheAdapter` — wraps LangChain's `InMemoryCache`
+- [x] `InMemoryCacheAdapter` — wraps LangChain's `InMemoryCache` (with maxsize support)
 - [x] `SQLiteCacheAdapter` — persistent SQLite with TTL
 - [x] `SemanticCacheAdapter` — hybrid exact + semantic (cosine similarity)
 - [x] Three-tier: embedding (1h), LLM (24h), RAG Q&A (24h)
@@ -27,7 +34,7 @@
 ### Token Reduction
 - [x] `chunk_size`: 1024 → 512
 - [x] `top_k`: 5 → 3
-- [x] `retrieval_min_score`: 0.25 (filter low-relevance chunks)
+- [x] `retrieval_min_score`: 0.15 (filter low-relevance chunks)
 
 ### Scheduler Cron Job
 - [x] JWT authentication with auto-refresh
@@ -36,6 +43,9 @@
 - [x] Exponential backoff retry logic (60s, 120s, 240s, ...)
 - [x] Last-fetch log (timestamp, count, status)
 - [x] Configurable interval via `.env`
+
+### Chunk IDs
+- [x] UUID-based chunk IDs (`chunk_{uuid4_hex[:12]}_{index}`) — eliminates collision risk on re-ingestion
 
 ## Architecture Overview
 
@@ -76,6 +86,10 @@
 | 2026-06-10 | Semantic cache: hybrid exact + cosine similarity matching |
 | 2026-06-10 | LangChain cache adapters: InMemoryCacheAdapter, SQLiteCacheAdapter |
 | 2026-06-14 | Three-stage cascading retrieval (Query Expansion + Loose Prompt) |
+| 2026-06-16 | AutoDocumentLoader: multi-format support (JSON, Markdown, Plain Text) |
+| 2026-06-16 | UUID-based chunk IDs to avoid collisions |
+| 2026-06-16 | retrieval_min_score lowered from 0.25 → 0.15 |
+| 2026-06-16 | LLM model changed to poolside/laguna-m.1:free |
 
 ## New Features: Synonym-Aware Retrieval
 
@@ -113,5 +127,4 @@
 ## Next Steps
 - [ ] Dockerfile sync (requirements.txt vs pyproject.toml)
 - [ ] Integration tests
-- [ ] UUID chunk IDs to avoid collisions
 - [ ] Admin endpoints for scheduler: POST /scheduler/run, GET /scheduler/status

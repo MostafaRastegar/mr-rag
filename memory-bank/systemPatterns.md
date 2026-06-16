@@ -24,7 +24,9 @@ The project follows a strict hexagonal architecture with clean separation betwee
 │  openrouter_llm.py        (implements LLMPort + streaming)   │
 │  chroma_vector_store.py   (implements VectorStorePort)        │
 │  document_loader.py       (implements DocLoaderPort)          │
+│    — AutoDocumentLoader: JSON, Markdown, Plain Text           │
 │  text_splitter.py         (implements TextSplitterPort)       │
+│    — UUID-based chunk IDs                                     │
 │  cache.py                 (implements CachePort)              │
 └───────────────────────────┬──────────────────────────────────┘
                             │ defined in
@@ -54,8 +56,9 @@ The project follows a strict hexagonal architecture with clean separation betwee
 - Using `httpx` directly for embedding and LLM endpoints
 - Full control over request/response handling
 
-### 2. LangChain used for text splitting and cache
+### 2. LangChain used for text splitting, document loading, and cache
 - `RecursiveCharacterTextSplitter` for robust chunking
+- `JSONLoader` for JSON files, `MarkdownHeaderTextSplitter` for Markdown, `TextLoader` for plain text
 - `InMemoryCache` from `langchain_core.caches` via `InMemoryCacheAdapter`
 - All results converted to domain objects to avoid coupling
 
@@ -88,7 +91,7 @@ Layer 3: RAG Q&A Cache (two sub-layers):
 ### 6. Token Reduction Strategy
 - `chunk_size`: 1024 → 512 (smaller chunks)
 - `top_k`: 5 → 3 (fewer chunks sent to LLM)
-- `retrieval_min_score`: 0.25 (filter low-relevance chunks)
+- `retrieval_min_score`: 0.15 (filter low-relevance chunks)
 - Result: ~70% reduction in LLM token consumption
 
 ### 7. Scheduler Cron Job
@@ -97,6 +100,18 @@ Layer 3: RAG Q&A Cache (two sub-layers):
 - Paginated data fetching from Scraper API
 - Exponential backoff retry (60s, 120s, 240s, ...)
 - Temp file lifecycle: save → ingest → cleanup
+
+### 8. Multi-Format Document Loading
+- `AutoDocumentLoader` dispatches by file extension
+- JSON: LangChain JSONLoader with jq schema extraction
+- Markdown: LangChain MarkdownHeaderTextSplitter (splits by headings)
+- Plain Text: LangChain TextLoader
+- Easy to extend with new formats by adding a new loader
+
+### 9. UUID-Based Chunk IDs
+- Format: `chunk_{uuid4_hex[:12]}_{index}`
+- Eliminates collision risk on re-ingestion
+- Prevents duplicate chunks in ChromaDB
 
 ## SOLID Principles
 
@@ -112,10 +127,10 @@ Layer 3: RAG Q&A Cache (two sub-layers):
 
 ### Ingestion Flow
 ```
-JSON File → JsonDocumentLoader.load()
+File (JSON/MD/TXT) → AutoDocumentLoader.load()
          → List[Document]
          → LangChainTextSplitter.split()
-         → List[Chunk]
+         → List[Chunk] (UUID-based IDs)
          → OpenRouterEmbedding.embed_documents()
          → List[List[float]]
          → ChromaVectorStore.add()
@@ -131,7 +146,7 @@ Question
   → [Semantic Cache Check] → HIT → return cached Answer
   → MISS:
     → Stage 1: ChromaDB search (top_k=3)
-      → Filter low-relevance (min_score)
+      → Filter low-relevance (min_score=0.15)
       → allow_low_score_fallback=False if cascade enabled
       → _is_low_relevance() if cascade enabled (avg < 0.30)
       → If no/low results + query_expansion_enabled=True:
