@@ -14,7 +14,10 @@ Three-stage cascading retrieval (controlled by settings flags):
 
 import json
 import logging
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, cast
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 
 from app.config import settings
 from app.core.domain import Answer, Message, SearchResult
@@ -23,7 +26,12 @@ from app.core.ports import CachePort, EmbeddingPort, LLMPort, VectorStorePort
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = (
+# ---------------------------------------------------------------------------
+# LangChain Prompt Templates
+# ---------------------------------------------------------------------------
+
+# System prompt strings (used directly since LLMPort expects Message objects)
+SYSTEM_PROMPT_STRICT = (
     "You are a helpful assistant that answers questions based on the provided context. "
     "Use only the information from the context to answer. "
     "If the context doesn't contain enough information, say so clearly."
@@ -38,12 +46,89 @@ SYSTEM_PROMPT_LOOSE = (
 
 SYSTEM_PROMPT_GENERAL = "You are a helpful assistant. Answer the user's question based on your general knowledge."
 
-QUERY_EXPANSION_PROMPT = (
+QUERY_EXPANSION_PROMPT_TEMPLATE = (
     "Rewrite the following question in {count} different ways. "
     "Use synonyms, rephrase the structure, and vary the wording to cover "
     "alternative phrasings of the same question. "
     "Output one variant per line, with no numbering, no bullet points, and no extra text."
 )
+
+# LangChain ChatPromptTemplates for structured prompt composition
+STRICT_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_STRICT),
+        (
+            "human",
+            "Context:\n{context}\n\nQuestion: {question}\n\n"
+            "Answer based only on the context above:",
+        ),
+    ]
+)
+
+LOOSE_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_LOOSE),
+        (
+            "human",
+            "Context:\n{context}\n\nQuestion: {question}\n\n"
+            "Use the context as your primary source, but you may supplement "
+            "with your own knowledge if it is insufficient. Clearly indicate "
+            "which parts come from the context and which from your knowledge.",
+        ),
+    ]
+)
+
+GENERAL_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_GENERAL),
+        ("human", "Question: {question}"),
+    ]
+)
+
+NO_CONTEXT_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_STRICT),
+        (
+            "human",
+            "Question: {question}\n\n"
+            "No specific context was retrieved for this question.",
+        ),
+    ]
+)
+
+QUERY_EXPANSION_CHAT = ChatPromptTemplate.from_messages(
+    [
+        ("system", QUERY_EXPANSION_PROMPT_TEMPLATE),
+        ("human", "{question}"),
+    ]
+)
+
+_output_parser = StrOutputParser()
+
+# ---------------------------------------------------------------------------
+# Role mapper: LangChain message types → OpenAI API role names
+# ---------------------------------------------------------------------------
+# LangChain's ChatPromptTemplate.format_messages() returns messages
+# with .type = "human", "ai", etc. But the LLM API (OpenRouter/OpenAI)
+# expects "user", "assistant", etc.
+_ROLE_MAP: dict[str, str] = {
+    "human": "user",
+    "ai": "assistant",
+    "system": "system",
+}
+
+
+def _map_messages(
+    formatted: list,
+) -> list:
+    """Convert LangChain formatted messages to domain Message objects with correct roles."""
+    result: list = []
+    for msg in formatted:
+        msg_type: str = cast(str, msg.type) if msg.type is not None else "user"
+        role: str = _ROLE_MAP.get(msg_type, msg_type)
+        content: str = str(msg.content) if msg.content is not None else ""
+        result.append(Message(role=role, content=content))
+    return result
 
 
 class RAGPipeline:
@@ -144,8 +229,6 @@ class RAGPipeline:
         # ------------------------------------------------------------------
         # Stage 1 — Normal retrieval
         # ------------------------------------------------------------------
-        # If any cascade stage is enabled, don't fall back to low-score chunks
-        # in Stage 1 — let the cascade handle it.
         use_cascade = settings.query_expansion_enabled or settings.loose_prompt_enabled
         results = self._search(
             query_embedding, allow_low_score_fallback=not use_cascade
@@ -175,7 +258,6 @@ class RAGPipeline:
                 text="I couldn't find any relevant information to answer your question.",
                 sources=[],
             )
-            # Cache the "no results" answer too
             if self._cache is not None:
                 llm_string = json.dumps(
                     {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
@@ -188,40 +270,23 @@ class RAGPipeline:
         # Build context from retrieved chunks (may be empty for Stage 3)
         context = self._build_context(results) if results else ""
 
-        # Generate answer using LLM
+        # Generate answer using LLM with the appropriate prompt template
         try:
             if context and not use_loose_prompt:
-                # Strict mode: answer based only on context
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Answer based only on the context above:"
+                formatted = STRICT_PROMPT.format_messages(
+                    context=context, question=question
                 )
-                system_prompt = SYSTEM_PROMPT
             elif context and use_loose_prompt:
-                # Loose mode with context: use context as primary source, supplement with own knowledge
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Use the context as your primary source, but you may supplement "
-                    f"with your own knowledge if it is insufficient. Clearly indicate "
-                    f"which parts come from the context and which from your knowledge."
+                formatted = LOOSE_PROMPT.format_messages(
+                    context=context, question=question
                 )
-                system_prompt = SYSTEM_PROMPT_LOOSE
             elif not context and use_loose_prompt:
-                # No context at all: answer from general knowledge
-                user_content = f"Question: {question}"
-                system_prompt = SYSTEM_PROMPT_GENERAL
+                formatted = GENERAL_PROMPT.format_messages(question=question)
             else:
-                # No context and no loose prompt: can't answer
-                user_content = (
-                    f"Question: {question}\n\n"
-                    f"No specific context was retrieved for this question."
-                )
-                system_prompt = SYSTEM_PROMPT
+                formatted = NO_CONTEXT_PROMPT.format_messages(question=question)
 
-            messages = [
-                Message(role="system", content=system_prompt),
-                Message(role="user", content=user_content),
-            ]
+            messages = _map_messages(formatted)
+
             answer_text = self._llm.generate(messages)
         except Exception as e:
             logger.error("LLM generation failed: %s", str(e))
@@ -235,7 +300,6 @@ class RAGPipeline:
                 {"pipeline": "rag", "top_k": settings.top_k}, sort_keys=True
             )
             self._cache.update(question, llm_string, json.dumps({"text": answer_text}))
-            # Also store in semantic cache for similar future questions
             if settings.cache_semantic_enabled:
                 self._cache.update_semantic(
                     query_embedding, json.dumps({"text": answer_text})
@@ -302,27 +366,22 @@ class RAGPipeline:
         # ------------------------------------------------------------------
         # Stage 1 — Normal retrieval
         # ------------------------------------------------------------------
-        # If any cascade stage is enabled, don't fall back to low-score chunks
-        # in Stage 1 — let the cascade handle it.
         use_cascade = settings.query_expansion_enabled or settings.loose_prompt_enabled
         results = self._search(
             query_embedding, allow_low_score_fallback=not use_cascade
         )
         use_loose_prompt = False
 
-        # Cascade trigger: empty results OR low-relevance results
         needs_expansion = not results or (
             use_cascade and results and self._is_low_relevance(results)
         )
 
-        # If query expansion is enabled and cascade is needed → Stage 2
         if needs_expansion and settings.query_expansion_enabled:
             logger.info(
                 "Stage 1 results low-relevance — trying query expansion (Stage 2)"
             )
             results = self._search_with_expansion(question)
 
-        # If loose prompt is enabled → Stage 3 (regardless of Stage 2 outcome)
         if settings.loose_prompt_enabled:
             logger.info("Loose prompt enabled — relaxing system prompt (Stage 3)")
             use_loose_prompt = True
@@ -332,43 +391,24 @@ class RAGPipeline:
             yield "I couldn't find any relevant information to answer your question."
             return
 
-        # Build context from retrieved chunks (may be empty for Stage 3)
         context = self._build_context(results) if results else ""
 
-        # Stream answer from LLM
+        # Stream answer from LLM using the appropriate prompt template
         try:
             if context and not use_loose_prompt:
-                # Strict mode: answer based only on context
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Answer based only on the context above:"
+                formatted = STRICT_PROMPT.format_messages(
+                    context=context, question=question
                 )
-                system_prompt = SYSTEM_PROMPT
             elif context and use_loose_prompt:
-                # Loose mode with context: use context as primary source, supplement with own knowledge
-                user_content = (
-                    f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                    f"Use the context as your primary source, but you may supplement "
-                    f"with your own knowledge if it is insufficient. Clearly indicate "
-                    f"which parts come from the context and which from your knowledge."
+                formatted = LOOSE_PROMPT.format_messages(
+                    context=context, question=question
                 )
-                system_prompt = SYSTEM_PROMPT_LOOSE
             elif not context and use_loose_prompt:
-                # No context at all: answer from general knowledge
-                user_content = f"Question: {question}"
-                system_prompt = SYSTEM_PROMPT_GENERAL
+                formatted = GENERAL_PROMPT.format_messages(question=question)
             else:
-                # No context and no loose prompt: can't answer
-                user_content = (
-                    f"Question: {question}\n\n"
-                    f"No specific context was retrieved for this question."
-                )
-                system_prompt = SYSTEM_PROMPT
+                formatted = NO_CONTEXT_PROMPT.format_messages(question=question)
 
-            messages = [
-                Message(role="system", content=system_prompt),
-                Message(role="user", content=user_content),
-            ]
+            messages = _map_messages(formatted)
 
             answer_parts: List[str] = []
             async for token in self._llm.generate_stream(messages):
@@ -437,7 +477,6 @@ class RAGPipeline:
         if not results:
             return []
 
-        # Filter out low-relevance chunks to save tokens
         min_score = settings.retrieval_min_score
         if min_score > 0:
             filtered = [r for r in results if r.score >= min_score]
@@ -468,6 +507,8 @@ class RAGPipeline:
         """
         Use the LLM to generate alternative phrasings of the user's question.
 
+        Uses LangChain's ChatPromptTemplate for structured prompt formatting.
+
         Returns:
             A list of alternative question strings (including the original).
         """
@@ -475,11 +516,11 @@ class RAGPipeline:
         if count < 1:
             return [question]
 
-        prompt = QUERY_EXPANSION_PROMPT.format(count=count)
-        messages = [
-            Message(role="system", content=prompt),
-            Message(role="user", content=question),
-        ]
+        # Format the query expansion prompt using LangChain's template
+        formatted = QUERY_EXPANSION_CHAT.format_messages(
+            count=str(count), question=question
+        )
+        messages = _map_messages(formatted)
 
         try:
             raw = self._llm.generate(messages, temperature=0.7, max_tokens=512)
@@ -489,10 +530,7 @@ class RAGPipeline:
             )
             return [question]
 
-        # Parse lines, strip whitespace, remove empty lines
         variants = [line.strip() for line in raw.splitlines() if line.strip()]
-
-        # Limit to requested count, add original question at the front
         all_queries = [question] + variants[:count]
         logger.info(
             "Query expansion generated %d variant(s): %s",
@@ -538,7 +576,6 @@ class RAGPipeline:
                     seen_ids.add(result.chunk.id)
                     merged.append(result)
 
-            # Early stop: if we already have enough results, break
             if len(merged) >= settings.top_k:
                 logger.info(
                     "Collected %d unique chunks from expansion, stopping early",
@@ -550,10 +587,8 @@ class RAGPipeline:
             logger.warning("Query expansion returned no results either")
             return []
 
-        # Re-sort by score descending (highest relevance first)
         merged.sort(key=lambda r: r.score, reverse=True)
 
-        # Apply the same min_score filter but keep top_k max
         min_score = settings.retrieval_min_score
         if min_score > 0:
             filtered = [r for r in merged if r.score >= min_score]
@@ -564,7 +599,8 @@ class RAGPipeline:
         logger.info("Merged %d unique chunks from query expansion", len(merged))
         return merged
 
-    def _build_context(self, results: List[SearchResult]) -> str:
+    @staticmethod
+    def _build_context(results: List[SearchResult]) -> str:
         """Build a context string from retrieved search results."""
         context_parts = []
         for i, result in enumerate(results, 1):
