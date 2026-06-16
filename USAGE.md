@@ -59,13 +59,19 @@ The API is now available at `http://localhost:8080`. OpenAPI docs at `http://loc
 curl http://localhost:8080/health
 ```
 
-Response: `{"status": "ok"}`
+Response:
+```json
+{
+  "status": "ok",
+  "vector_store_count": 47
+}
+```
 
 ---
 
 ### Ingest Data
 
-Load a JSON file, split it into chunks, embed, and store in ChromaDB.
+Load a file (JSON, Markdown, or Plain Text), split it into chunks, embed, and store in ChromaDB.
 
 ```bash
 curl -X POST http://localhost:8080/ingest \
@@ -76,12 +82,20 @@ curl -X POST http://localhost:8080/ingest \
 Response:
 ```json
 {
-  "message": "Ingested 47 chunks from data/recipes_1.json",
-  "chunks": 47
+  "status": "success",
+  "chunks_ingested": 47
 }
 ```
 
-**JSON format supported:**
+**Supported file formats:**
+
+| Format | Extension | Loader | Description |
+|--------|-----------|--------|-------------|
+| JSON | `.json` | LangChain JSONLoader | List of objects with `content` or `text` field |
+| Markdown | `.md` | MarkdownHeaderTextSplitter | Splits by headings (#, ##, ###, etc.) |
+| Plain Text | `.txt` | LangChain TextLoader | Entire file as one document |
+
+**JSON format example:**
 ```json
 [
   {"content": "text content here", "title": "optional title"},
@@ -107,11 +121,8 @@ Response:
   "answer": "Fesenjan is a Persian stew made with...",
   "sources": [
     {
-      "chunk": {
-        "text": "مواد لازم فسنجون: یک کیلو مرغ، ۳۰۰ گرم گردو...",
-        "metadata": {"title": "دستور پخت فسنجون"},
-        "id": "chunk_3"
-      },
+      "content": "مواد لازم فسنجون: یک کیلو مرغ، ۳۰۰ گرم گردو...",
+      "metadata": {"title": "دستور پخت فسنجون"},
       "score": 0.84
     }
   ]
@@ -219,7 +230,7 @@ All settings are in `.env` file:
 | `OPENROUTER_API_KEY` | — | OpenRouter API key |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | API base URL |
 | `EMBEDDING_MODEL` | `nvidia/llama-nemotron-embed-vl-1b-v2:free` | Embedding model |
-| `LLM_MODEL` | `meta-llama/llama-3.3-70b-instruct` | LLM model |
+| `LLM_MODEL` | `poolside/laguna-m.1:free` | LLM model |
 | `CHROMA_HOST` | `127.0.0.1` | ChromaDB host |
 | `CHROMA_PORT` | `8000` | ChromaDB port |
 | `APP_HOST` | `0.0.0.0` | App listen address |
@@ -227,7 +238,7 @@ All settings are in `.env` file:
 | `CHUNK_SIZE` | `512` | Text chunk size (characters) |
 | `CHUNK_OVERLAP` | `100` | Chunk overlap |
 | `TOP_K` | `3` | Number of chunks retrieved |
-| `RETRIEVAL_MIN_SCORE` | `0.25` | Minimum relevance score |
+| `RETRIEVAL_MIN_SCORE` | `0.15` | Minimum relevance score |
 | `CACHE_TYPE` | `memory` | Cache backend: `memory` or `sqlite` |
 | `CACHE_SEMANTIC_ENABLED` | `true` | Enable semantic cache |
 | `CACHE_SEMANTIC_THRESHOLD` | `0.92` | Semantic similarity threshold |
@@ -258,13 +269,13 @@ mr-rag/
 │   ├── infrastructure/         # Adapters (external integrations)
 │   │   ├── cache.py            # InMemoryCacheAdapter, SQLiteCacheAdapter, SemanticCacheAdapter
 │   │   ├── chroma_vector_store.py
-│   │   ├── document_loader.py
+│   │   ├── document_loader.py  # AutoDocumentLoader (JSON, Markdown, Plain Text)
 │   │   ├── openrouter_embedding.py
 │   │   ├── openrouter_llm.py
-│   │   └── text_splitter.py
+│   │   └── text_splitter.py    # UUID-based chunk IDs
 │   ├── pipeline/               # Business logic
 │   │   ├── ingestion.py        # Load → split → embed → store
-│   │   └── rag.py              # Embed → search → generate (with cache)
+│   │   └── rag.py              # Embed → search → generate (with cache + cascade)
 │   ├── scheduler/              # Cron job
 │   │   ├── config.py           # Scheduler settings
 │   │   ├── auth.py             # JWT authentication
@@ -276,13 +287,11 @@ mr-rag/
 │   └── main.py                 # FastAPI app + DI wiring
 ├── data/                       # JSON data files
 ├── memory-bank/                # Project documentation
-├── FEATURES.md                  # Feature overview
-├── USAGE.md                     # Usage guide
+├── FEATURES.md                 # Feature overview
+├── USAGE.md                    # Usage guide
 ├── docker-compose.yml
 └── pyproject.toml
 ```
-
----
 
 ---
 
