@@ -1,16 +1,16 @@
 # Product Context
 
 ## Problem
-Need an intelligent question-answering system that can search across data collected by a web scraper (JSON format). Manual search through large scraped datasets is impractical. Additionally, the system must automatically fetch and ingest new data periodically without manual intervention.
+Need an intelligent question-answering system that can search across data collected by a web scraper (JSON format) or other document formats (Markdown, Plain Text). Manual search through large scraped datasets is impractical. Additionally, the system must automatically fetch and ingest new data periodically without manual intervention.
 
 ## Solution
 Use RAG architecture with three stages:
 
 ### 1. Ingestion
-Read JSON → split into optimized chunks → generate embeddings → store in ChromaDB
+Read file (JSON/Markdown/Text) → split into optimized chunks → generate embeddings → store in ChromaDB
 
 ### 2. Retrieval
-Embed user question → search ChromaDB → filter low-relevance chunks (min_score=0.25) → return top matches
+Embed user question → search ChromaDB → filter low-relevance chunks (min_score=0.15) → return top matches
 
 ### 3. Generation
 Build context from retrieved chunks → call OpenRouter LLM → return answer with streaming support
@@ -18,13 +18,19 @@ Build context from retrieved chunks → call OpenRouter LLM → return answer wi
 ### 4. Automated Scheduling
 Periodically fetch data from external Scraper API → ingest → cleanup temp files
 
+### 5. Cascading Retrieval (Synonym Support)
+Three-stage cascade to handle questions with synonyms or out-of-context queries:
+- Stage 1: Normal strict retrieval
+- Stage 2: Query Expansion (re-phrase with synonyms)
+- Stage 3: Loose Prompt (relax system prompt, allow general knowledge)
+
 ## User Experience
 
 ### API Endpoints
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Service health check |
-| `POST` | `/ingest` | Load a JSON file, chunk, embed, and index it |
+| `POST` | `/ingest` | Load a file (JSON/MD/TXT), chunk, embed, and index it |
 | `POST` | `/chat` | Ask a question, get a complete answer |
 | `POST` | `/chat/stream` | Ask a question, get a streaming (SSE) answer |
 
