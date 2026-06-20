@@ -216,5 +216,8 @@ curl -N -X POST http://localhost:8080/chat/stream \
 ### Docker
 - ChromaDB service with persistent volumes
 - App Dockerfile exists (needs `requirements.txt` sync with `pyproject.toml`)
-- Both services use `network_mode: host`
+- Both services share a custom bridge network (`app_network`) for inter-container DNS resolution
+- `CHROMA_HOST=chromadb` overrides `.env` value when running via Docker Compose
+- `depends_on` with `condition: service_healthy` ensures ChromaDB is ready before app starts
+- Ports `8000` and `8080` are exposed to host for local browser access
 - Base image: `hub.hamdocker.ir/python:3.13-slim`

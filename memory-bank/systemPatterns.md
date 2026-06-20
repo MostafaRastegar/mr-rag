@@ -103,7 +103,9 @@ Layer 3: RAG Q&A Cache (two sub-layers):
 
 ### 8. Multi-Format Document Loading
 - `AutoDocumentLoader` dispatches by file extension
-- JSON: LangChain JSONLoader with jq schema extraction
+- JSON: LangChain JSONLoader with **auto-detection** of content field from priority key list (`content`, `text`, `body`, `description`, `article`, `markdown`, `html`, `summary`, `text_content`, `page_content`) + fallback to longest string value
+- JSON structure normalization: wrapped keys (`{"data": [...]}`, `{"results": [...]}`, etc.), list-of-strings, and single strings all handled automatically via `_normalize_json_structure()`
+- Temp-file strategy: normalised records written to a temporary file so JSONLoader always reads a consistent flat list of dicts
 - Markdown: LangChain MarkdownHeaderTextSplitter (splits by headings)
 - Plain Text: LangChain TextLoader
 - Easy to extend with new formats by adding a new loader

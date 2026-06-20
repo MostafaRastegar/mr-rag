@@ -20,7 +20,7 @@ Use this skill when modifying the ingestion pipeline, adding a new document sour
 ## Pipeline Flow
 
 ```
-JSON File → JsonDocumentLoader (LangChain JSONLoader with jq schema)
+JSON File → JsonDocumentLoader (LangChain JSONLoader)
          → List[Document]
          → LangChainTextSplitter.split() (RecursiveCharacterTextSplitter)
          → List[Chunk]
@@ -34,12 +34,37 @@ JSON File → JsonDocumentLoader (LangChain JSONLoader with jq schema)
 
 All document loaders implement `DocumentLoaderPort` and use LangChain internally:
 
-| Loader | LangChain Component | File Format |
-|--------|-------------------|-------------|
-| `JsonDocumentLoader` | `JSONLoader` with jq schema + `metadata_func` | `.json` |
-| `MarkdownDocumentLoader` | `MarkdownHeaderTextSplitter` (heading hierarchy) | `.md` |
-| `TextDocumentLoader` | `TextLoader` | `.txt` |
-| `AutoDocumentLoader` | Composite — dispatches by extension | auto-detect |
+| Loader | LangChain Component | File Format | Features |
+|--------|-------------------|-------------|----------|
+| `JsonDocumentLoader` | `JSONLoader` with jq schema + `metadata_func` | `.json` | Auto-detects content key from priority list; normalizes wrapped/string structures via temp file |
+| `MarkdownDocumentLoader` | `MarkdownHeaderTextSplitter` (heading hierarchy) | `.md` | Splits by `#` / `##` / ... / `######` headings |
+| `TextDocumentLoader` | `TextLoader` | `.txt` | Single document per file |
+| `AutoDocumentLoader` | Composite — dispatches by extension | auto-detect | Delegates to the above based on `.json`, `.md`, `.txt` |
+
+## JsonDocumentLoader Details
+
+The `JsonDocumentLoader` handles a wide variety of JSON structures automatically:
+
+### Content Key Detection (`_detect_content_key`)
+
+Priority list of common content-field keys (checked in order):
+`content`, `text`, `body`, `description`, `article`, `markdown`, `html`, `summary`, `text_content`, `page_content`
+
+If none match, falls back to the longest string-valued field. If no string fields exist, defaults to `"content"`.
+
+### JSON Structure Normalization (`_normalize_json_structure`)
+
+| Input | Behavior |
+|-------|----------|
+| `[{"content": "..."}, ...]` | Used as-is |
+| `{"content": "..."}` (single dict) | Wrapped in a list |
+| `{"data": [{"body": "..."}]}` | Wrapper key (`data`, `results`, `items`, `documents`, `records`, `recipes`, `posts`, `articles`, `entries`, `rows`) — unwrapped automatically |
+| `["str1", "str2", ...]` (list of strings) | Each string converted to `{"content": str}` |
+| `"just a string"` (single string) | Converted to `[{"content": "just a string"}]` |
+
+### Temp-file Strategy
+
+Since LangChain's `JSONLoader` re-reads the original file directly, the loader writes normalised records to a temporary file (automatically cleaned up in `finally`) before passing it to `JSONLoader`. This ensures a consistently flat `[{...}, ...]` format regardless of the original structure.
 
 ## Code Structure
 

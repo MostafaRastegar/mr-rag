@@ -7,6 +7,7 @@ document loaders for JSON, Markdown, and plain text files.
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any, List
 
@@ -31,8 +32,98 @@ _SUPPORTED_EXTENSIONS: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# JSON Loader (LangChain JSONLoader)
+# Common content-field key names (ordered by priority)
 # ---------------------------------------------------------------------------
+
+_CONTENT_KEYS: list[str] = [
+    "content",
+    "text",
+    "body",
+    "description",
+    "article",
+    "markdown",
+    "html",
+    "summary",
+    "text_content",
+    "page_content",
+]
+
+# Common wrapper keys that may contain the actual array
+_WRAPPER_KEYS: list[str] = [
+    "data",
+    "results",
+    "items",
+    "documents",
+    "records",
+    "recipes",
+    "posts",
+    "articles",
+    "entries",
+    "rows",
+]
+
+
+def _detect_content_key(record: dict) -> str:
+    """
+    Detect the most likely content-field key in a JSON record.
+
+    Checks a priority list of common keys first. If none match, picks
+    the longest string-valued field as a fallback.
+
+    Args:
+        record: A single JSON object (dict).
+
+    Returns:
+        The key name to use as the content field.
+    """
+    for key in _CONTENT_KEYS:
+        if key in record:
+            return key
+    # Fallback: longest string value
+    string_fields = {k: v for k, v in record.items() if isinstance(v, str)}
+    if string_fields:
+        return max(string_fields, key=lambda k: len(string_fields[k]))
+    return "content"
+
+
+def _normalize_json_structure(raw_data: Any) -> list[dict]:
+    """
+    Normalize any JSON structure into a list of dict records.
+
+    Handles:
+      - List of dicts        -> as-is
+      - Single dict          -> wrapped in a list
+      - Wrapped in a key     -> e.g. {"data": [...]}
+      - List of strings      -> each string becomes {"content": str}
+      - Single string        -> wrapped as [{"content": str}]
+
+    Args:
+        raw_data: The parsed JSON data.
+
+    Returns:
+        A list of dict records.
+    """
+    # List of strings -> convert to dicts
+    if isinstance(raw_data, list) and raw_data and isinstance(raw_data[0], str):
+        return [{"content": item} for item in raw_data]
+
+    # Single string
+    if isinstance(raw_data, str):
+        return [{"content": raw_data}]
+
+    # Single dict -> check for wrapper key
+    if isinstance(raw_data, dict):
+        for key in _WRAPPER_KEYS:
+            if key in raw_data and isinstance(raw_data[key], list):
+                inner = raw_data[key]
+                if inner and isinstance(inner[0], str):
+                    return [{"content": item} for item in inner]
+                return inner
+        # No wrapper key found -> wrap the dict itself
+        return [raw_data]
+
+    # Already a list of dicts
+    return raw_data
 
 
 def _json_metadata_func(record: dict, metadata: dict) -> dict:
@@ -56,11 +147,14 @@ class JsonDocumentLoader(DocumentLoaderPort):
     """
     Loads documents from JSON files using LangChain's JSONLoader.
 
-    Expected JSON format: a list of objects (or a single object), each with
-    at least a 'content' or 'text' field. Additional fields like 'title',
-    'url', 'source' are kept as metadata.
+    Automatically detects the content field from a priority list of
+    common keys (content, text, body, description, article, etc.).
+    Also normalises wrapped structures like ``{"data": [...]}`` and
+    handles list-of-strings input.
 
-    Uses jq schema internally for robust field extraction.
+    Internally normalises any JSON structure into a flat list of dicts
+    and writes it to a temporary file so LangChain's JSONLoader can
+    always work with a consistent ``[{"content": ..., ...}]`` format.
     """
 
     def load(self, file_path: str) -> List[Document]:
@@ -80,21 +174,35 @@ class JsonDocumentLoader(DocumentLoaderPort):
         if not path.exists():
             raise DocumentLoadError(f"File not found: {file_path}")
 
+        tmp_path: str | None = None
+
         try:
-            # First, inspect the JSON structure to determine the jq schema
+            # First, inspect the JSON structure
             with open(path, "r", encoding="utf-8") as f:
                 raw_data = json.load(f)
 
-            # Normalize: if it's a single dict, wrap it in a list
-            if isinstance(raw_data, dict):
-                raw_data = [raw_data]
+            # Normalise into a flat list of dicts
+            records = _normalize_json_structure(raw_data)
 
-            # Use LangChain's JSONLoader with a schema that extracts
-            # the content field plus all metadata via metadata_func
+            if not records:
+                logger.warning("Empty JSON array in %s", file_path)
+                return []
+
+            # Detect the content key from the first record
+            sample_key = _detect_content_key(records[0])
+
+            # Write normalised records to a temp file so LangChain's
+            # JSONLoader reads a consistently flat list of dicts.
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+                json.dump(records, tmp, ensure_ascii=False)
+
             loader = JSONLoader(
-                file_path=str(path),
+                file_path=tmp_path,
                 jq_schema=".[]",
-                content_key='.content // .text // ""',
+                content_key=sample_key,
                 metadata_func=_json_metadata_func,
                 text_content=False,
             )
@@ -107,6 +215,10 @@ class JsonDocumentLoader(DocumentLoaderPort):
             raise DocumentLoadError(f"Cannot read {file_path}: {e}") from e
         except Exception as e:
             raise DocumentLoadError(f"Failed to load JSON from {file_path}: {e}") from e
+        finally:
+            # Clean up the temp file if it was created
+            if tmp_path is not None:
+                Path(tmp_path).unlink(missing_ok=True)
 
         # Convert LangChain Documents to domain Documents
         documents = [
@@ -116,9 +228,11 @@ class JsonDocumentLoader(DocumentLoaderPort):
         ]
 
         logger.info(
-            "Loaded %d documents from %s using LangChain JSONLoader",
+            "Loaded %d documents from %s using LangChain JSONLoader "
+            "(content_key='%s')",
             len(documents),
             file_path,
+            sample_key,
         )
         return documents
 
