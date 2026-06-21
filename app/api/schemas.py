@@ -41,6 +41,38 @@ class ChatResponse(BaseModel):
     sources: list[SourceItem]
 
 
+class SearchRequest(BaseModel):
+    """Request body for the /search endpoint."""
+
+    query: str
+    top_k: int = 10
+
+
+class SearchResultItem(BaseModel):
+    """A single result from a vector search."""
+
+    content: str
+    metadata: dict
+    score: float
+
+
+class SearchResponse(BaseModel):
+    """Response body for the /search endpoint."""
+
+    query: str
+    total: int
+    results: list[SearchResultItem]
+
+
+class UploadResponse(BaseModel):
+    """Response body for the /upload endpoint."""
+
+    status: str
+    file_name: str
+    chunks_ingested: int
+    message: str
+
+
 class HealthResponse(BaseModel):
     """Response body for the /health endpoint."""
 

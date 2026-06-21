@@ -6,8 +6,10 @@ pipeline, and returns a serialized response. No business logic here.
 """
 
 import logging
+import os
+import tempfile
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
@@ -16,14 +18,19 @@ from app.api.schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    SearchRequest,
+    SearchResponse,
+    SearchResultItem,
     SourceItem,
+    UploadResponse,
 )
 from app.core.exceptions import (
     DocumentLoadError,
+    EmbeddingError,
     IngestionError,
     RetrievalError,
 )
-from app.core.ports import VectorStorePort
+from app.core.ports import EmbeddingPort, VectorStorePort
 from app.pipeline.ingestion import IngestionPipeline
 from app.pipeline.rag import RAGPipeline
 
@@ -34,6 +41,7 @@ def create_router(
     ingestion: IngestionPipeline,
     rag: RAGPipeline,
     vector_store: VectorStorePort,
+    embedding: EmbeddingPort | None = None,
 ) -> APIRouter:
     """
     Factory function to create the API router with dependency injection.
@@ -124,5 +132,86 @@ def create_router(
             rag.answer_stream(request.question),
             media_type="text/plain",
         )
+
+    @router.post("/search", response_model=SearchResponse)
+    def search(request: SearchRequest):
+        """
+        Direct vector search — no LLM call.
+
+        Embeds the query, searches ChromaDB, and returns raw matching
+        chunks with their relevance scores and metadata.
+        """
+        if embedding is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Search endpoint is not available (embedding port not injected)",
+            )
+
+        if not request.query.strip():
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+        try:
+            query_embedding = embedding.embed_query(request.query)
+            results = vector_store.search(query_embedding, request.top_k)
+        except EmbeddingError as e:
+            logger.exception("Search embedding failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Unexpected search error")
+            raise HTTPException(status_code=500, detail=f"Search failed: {e}")
+
+        return SearchResponse(
+            query=request.query,
+            total=len(results),
+            results=[
+                SearchResultItem(
+                    content=r.chunk.text[:500],
+                    metadata=r.chunk.metadata,
+                    score=r.score,
+                )
+                for r in results
+            ],
+        )
+
+    @router.post("/upload", response_model=UploadResponse)
+    async def upload_file(file: UploadFile = File(...)):
+        """
+        Upload a file (JSON, MD, or TXT) and ingest it into the vector store.
+
+        The file is saved to a temporary location, ingested, then deleted.
+        """
+        # validate extension
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext not in (".json", ".md", ".txt"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type '{ext}'. Use .json, .md, or .txt",
+            )
+
+        # save to temp file
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=ext, delete=False, mode="wb"
+        )
+        try:
+            content = await file.read()
+            tmp.write(content)
+            tmp.close()
+
+            chunks = ingestion.run(tmp.name)
+            return UploadResponse(
+                status="success",
+                file_name=file.filename or "unknown",
+                chunks_ingested=chunks,
+                message=f"فایل با موفقیت بارگذاری شد. {chunks} قطعه استخراج شد.",
+            )
+        except (DocumentLoadError, IngestionError) as e:
+            logger.exception("Upload ingestion failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Unexpected upload error")
+            raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+        finally:
+            if os.path.exists(tmp.name):
+                os.unlink(tmp.name)
 
     return router

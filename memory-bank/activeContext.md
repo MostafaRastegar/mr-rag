@@ -14,10 +14,12 @@
 
 ### Document Loading (Multi-Format)
 - [x] `AutoDocumentLoader` — dispatches by file extension
-- [x] `JsonDocumentLoader` — LangChain JSONLoader with jq schema
+- [x] `JsonDocumentLoader` — LangChain JSONLoader with **auto-detection** of content field from priority key list (`content`, `text`, `body`, `description`, `article`, etc.) + fallback to longest string value
 - [x] `MarkdownDocumentLoader` — LangChain MarkdownHeaderTextSplitter (splits by headings)
 - [x] `TextDocumentLoader` — LangChain TextLoader
 - [x] Supported formats: `.json`, `.md`, `.txt`
+- [x] JSON structure normalization: wrapped keys (`{"data": [...]}`), list-of-strings, single strings all handled automatically
+- [x] Temp-file strategy: normalised records written to temp file before JSONLoader processes them
 
 ### Caching (LangChain-based)
 - [x] `InMemoryCacheAdapter` — wraps LangChain's `InMemoryCache` (with maxsize support)

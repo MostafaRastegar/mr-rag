@@ -7,7 +7,9 @@
 - **OpenRouter Embedding Adapter** — Direct HTTP via httpx, with optional CachePort
 - **OpenRouter LLM Adapter** — Direct HTTP via httpx, with optional CachePort and **streaming SSE**
 - **ChromaDB Vector Store Adapter** — Full CRUD with cosine similarity, null-collection safety checks
-- **JSON Document Loader** — Uses LangChain JSONLoader with jq schema extraction
+- **JSON Document Loader** — Uses LangChain JSONLoader with **auto-detection** of content field from priority key list (`content`, `text`, `body`, `description`, `article`, `markdown`, `html`, `summary`, `text_content`, `page_content`) + fallback to longest string value
+- **JSON structure normalization** — Handles wrapped keys (`{"data": [...]}`, `{"results": [...]}`, etc.), list-of-strings, and single strings via `_normalize_json_structure()`
+- **Temp-file strategy** — Normalised records written to temp file so JSONLoader always reads a consistent flat list of dicts
 - **Markdown Document Loader** — Uses LangChain MarkdownHeaderTextSplitter (splits by headings)
 - **Plain Text Document Loader** — Uses LangChain TextLoader
 - **AutoDocumentLoader** — Dispatches by file extension (.json, .md, .txt)
