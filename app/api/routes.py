@@ -18,15 +18,19 @@ from app.api.schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    SearchRequest,
+    SearchResponse,
+    SearchResultItem,
     SourceItem,
     UploadResponse,
 )
 from app.core.exceptions import (
     DocumentLoadError,
+    EmbeddingError,
     IngestionError,
     RetrievalError,
 )
-from app.core.ports import VectorStorePort
+from app.core.ports import EmbeddingPort, VectorStorePort
 from app.pipeline.ingestion import IngestionPipeline
 from app.pipeline.rag import RAGPipeline
 
@@ -37,6 +41,7 @@ def create_router(
     ingestion: IngestionPipeline,
     rag: RAGPipeline,
     vector_store: VectorStorePort,
+    embedding: EmbeddingPort | None = None,
 ) -> APIRouter:
     """
     Factory function to create the API router with dependency injection.
@@ -126,6 +131,46 @@ def create_router(
         return StreamingResponse(
             rag.answer_stream(request.question),
             media_type="text/plain",
+        )
+
+    @router.post("/search", response_model=SearchResponse)
+    def search(request: SearchRequest):
+        """
+        Direct vector search — no LLM call.
+
+        Embeds the query, searches ChromaDB, and returns raw matching
+        chunks with their relevance scores and metadata.
+        """
+        if embedding is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Search endpoint is not available (embedding port not injected)",
+            )
+
+        if not request.query.strip():
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+        try:
+            query_embedding = embedding.embed_query(request.query)
+            results = vector_store.search(query_embedding, request.top_k)
+        except EmbeddingError as e:
+            logger.exception("Search embedding failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Unexpected search error")
+            raise HTTPException(status_code=500, detail=f"Search failed: {e}")
+
+        return SearchResponse(
+            query=request.query,
+            total=len(results),
+            results=[
+                SearchResultItem(
+                    content=r.chunk.text[:500],
+                    metadata=r.chunk.metadata,
+                    score=r.score,
+                )
+                for r in results
+            ],
         )
 
     @router.post("/upload", response_model=UploadResponse)

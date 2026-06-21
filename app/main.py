@@ -112,5 +112,6 @@ app.include_router(
         ingestion=ingestion_pipeline,
         rag=rag_pipeline,
         vector_store=vector_store,
+        embedding=embedding,
     )
 )

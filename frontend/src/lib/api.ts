@@ -39,6 +39,18 @@ export interface UploadResponse {
   message: string;
 }
 
+export interface SearchResultItem {
+  content: string;
+  metadata: Record<string, unknown>;
+  score: number;
+}
+
+export interface SearchResponse {
+  query: string;
+  total: number;
+  results: SearchResultItem[];
+}
+
 /* ------------------------------------------------------------------ */
 /*  Chat (full response)                                               */
 /* ------------------------------------------------------------------ */
@@ -131,6 +143,26 @@ export async function ingestFile(filePath: string): Promise<IngestResponse> {
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Ingest failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Search (direct vector search, no LLM)                              */
+/* ------------------------------------------------------------------ */
+
+export async function searchDocuments(
+  query: string,
+  top_k: number = 10,
+): Promise<SearchResponse> {
+  const res = await fetch(`${API_BASE}/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, top_k }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Search failed (${res.status}): ${err}`);
   }
   return res.json();
 }

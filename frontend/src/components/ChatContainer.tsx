@@ -1,13 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Loader2, WifiOff, Square, RotateCcw, Upload } from "lucide-react";
+import {
+  Loader2,
+  WifiOff,
+  Square,
+  RotateCcw,
+  Upload,
+  Search,
+} from "lucide-react";
 import ChatInput from "./ChatInput";
 import MessageBubble from "./MessageBubble";
 import type { Message } from "./MessageBubble";
 import Sidebar from "./Sidebar";
 import FileUpload from "./FileUpload";
 import type { UploadResult } from "./FileUpload";
+import SearchPanel from "./SearchPanel";
 import { sendChat, chatStream, getHealth } from "@/lib/api";
 import type { HealthResponse } from "@/lib/api";
 import { getConversation, saveConversation } from "@/lib/db";
@@ -55,6 +63,7 @@ export default function ChatContainer() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [showUpload, setShowUpload] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef(messages);
@@ -356,6 +365,8 @@ export default function ChatContainer() {
         />
       )}
 
+      {showSearch && <SearchPanel onClose={() => setShowSearch(false)} />}
+
       <div className="mx-auto flex h-dvh w-full max-w-3xl flex-col">
         {/* header */}
         <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 pr-12 dark:border-zinc-700">
@@ -364,6 +375,16 @@ export default function ChatContainer() {
           </h1>
 
           <div className="flex items-center gap-2">
+            {/* search button */}
+            <button
+              onClick={() => setShowSearch(true)}
+              className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              title="جستجو در اسناد"
+            >
+              <Search size={13} />
+              جستجو
+            </button>
+
             {/* upload button */}
             <button
               onClick={() => setShowUpload(true)}
