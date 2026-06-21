@@ -41,6 +41,15 @@ class ChatResponse(BaseModel):
     sources: list[SourceItem]
 
 
+class UploadResponse(BaseModel):
+    """Response body for the /upload endpoint."""
+
+    status: str
+    file_name: str
+    chunks_ingested: int
+    message: str
+
+
 class HealthResponse(BaseModel):
     """Response body for the /health endpoint."""
 

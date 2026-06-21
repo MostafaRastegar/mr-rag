@@ -6,8 +6,10 @@ pipeline, and returns a serialized response. No business logic here.
 """
 
 import logging
+import os
+import tempfile
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
@@ -17,6 +19,7 @@ from app.api.schemas import (
     IngestRequest,
     IngestResponse,
     SourceItem,
+    UploadResponse,
 )
 from app.core.exceptions import (
     DocumentLoadError,
@@ -124,5 +127,46 @@ def create_router(
             rag.answer_stream(request.question),
             media_type="text/plain",
         )
+
+    @router.post("/upload", response_model=UploadResponse)
+    async def upload_file(file: UploadFile = File(...)):
+        """
+        Upload a file (JSON, MD, or TXT) and ingest it into the vector store.
+
+        The file is saved to a temporary location, ingested, then deleted.
+        """
+        # validate extension
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        if ext not in (".json", ".md", ".txt"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type '{ext}'. Use .json, .md, or .txt",
+            )
+
+        # save to temp file
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=ext, delete=False, mode="wb"
+        )
+        try:
+            content = await file.read()
+            tmp.write(content)
+            tmp.close()
+
+            chunks = ingestion.run(tmp.name)
+            return UploadResponse(
+                status="success",
+                file_name=file.filename or "unknown",
+                chunks_ingested=chunks,
+                message=f"فایل با موفقیت بارگذاری شد. {chunks} قطعه استخراج شد.",
+            )
+        except (DocumentLoadError, IngestionError) as e:
+            logger.exception("Upload ingestion failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Unexpected upload error")
+            raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+        finally:
+            if os.path.exists(tmp.name):
+                os.unlink(tmp.name)
 
     return router

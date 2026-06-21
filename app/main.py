@@ -8,6 +8,7 @@ dependency injection pattern at module level.
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.api.routes import create_router
@@ -82,6 +83,28 @@ rag_pipeline = RAGPipeline(
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="AI RAG System", version="1.0.0")
+
+# ---------------------------------------------------------------------------
+# CORS — allow frontend dev server
+# ---------------------------------------------------------------------------
+
+_ALLOWED_ORIGINS = getattr(settings, "cors_origins", None)
+if _ALLOWED_ORIGINS:
+    origins = [o.strip() for o in _ALLOWED_ORIGINS.split(",") if o.strip()]
+else:
+    # default: localhost:3000 (Next.js dev) + production port 8080
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Register routes with injected dependencies
 app.include_router(
