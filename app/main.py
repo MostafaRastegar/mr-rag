@@ -119,5 +119,8 @@ app.include_router(
         vector_store=vector_store,
         embedding=embedding,
         doc_repo=doc_repo,
+        cache_embedding=_cache_embedding,
+        cache_llm=_cache_llm,
+        cache_rag=_cache_rag,
     )
 )

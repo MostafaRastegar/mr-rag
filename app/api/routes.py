@@ -13,6 +13,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
+    AdminStatsResponse,
+    CacheClearResponse,
     ChatRequest,
     ChatResponse,
     DocumentDeleteResponse,
@@ -21,6 +23,8 @@ from app.api.schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    SchedulerRunResponse,
+    SchedulerStatusResponse,
     SearchRequest,
     SearchResponse,
     SearchResultItem,
@@ -34,9 +38,11 @@ from app.core.exceptions import (
     RetrievalError,
     VectorStoreError,
 )
-from app.core.ports import DocumentRepositoryPort, EmbeddingPort, VectorStorePort
+from app.core.ports import CachePort, DocumentRepositoryPort, EmbeddingPort, VectorStorePort
 from app.pipeline.ingestion import IngestionPipeline
 from app.pipeline.rag import RAGPipeline
+from app.scheduler.logger import read_last_fetch
+from app.scheduler.job import run_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,9 @@ def create_router(
     vector_store: VectorStorePort,
     embedding: EmbeddingPort | None = None,
     doc_repo: DocumentRepositoryPort | None = None,
+    cache_embedding: CachePort | None = None,
+    cache_llm: CachePort | None = None,
+    cache_rag: CachePort | None = None,
 ) -> APIRouter:
     """
     Factory function to create the API router with dependency injection.
@@ -57,6 +66,9 @@ def create_router(
         vector_store: The vector store instance.
         embedding: Optional embedding port for the search endpoint.
         doc_repo: Optional document repository for document management.
+        cache_embedding: Optional embedding cache for admin stats.
+        cache_llm: Optional LLM cache for admin stats.
+        cache_rag: Optional RAG cache for admin stats.
 
     Returns:
         A configured APIRouter with all endpoints.
@@ -321,5 +333,98 @@ def create_router(
         except Exception as e:
             logger.exception("Failed to delete document")
             raise HTTPException(status_code=500, detail=str(e))
+
+    # ------------------------------------------------------------------
+    # Admin Endpoints
+    # ------------------------------------------------------------------
+
+    @router.post("/admin/scheduler/run", response_model=SchedulerRunResponse)
+    def admin_scheduler_run():
+        """
+        Manually trigger the scheduler job.
+        Fetches data from the Scraper API, ingests it, and cleans up.
+        """
+        try:
+            run_with_retry()
+            return SchedulerRunResponse(
+                status="success",
+                message="Scheduler job completed successfully",
+            )
+        except Exception as e:
+            logger.exception("Manual scheduler run failed")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/admin/scheduler/status", response_model=SchedulerStatusResponse)
+    def admin_scheduler_status():
+        """
+        Get the status of the last scheduler fetch.
+        """
+        try:
+            log = read_last_fetch()
+            if log is None:
+                return SchedulerStatusResponse()
+            return SchedulerStatusResponse(
+                last_fetch=log.get("last_fetch"),
+                total_documents=log.get("total_documents"),
+                status=log.get("status"),
+                error_message=log.get("error_message"),
+            )
+        except Exception as e:
+            logger.exception("Failed to read scheduler status")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post("/admin/cache/clear", response_model=CacheClearResponse)
+    def admin_cache_clear():
+        """
+        Clear all cache layers (embedding, LLM, and RAG).
+        """
+        cleared = []
+        if cache_embedding is not None:
+            try:
+                cache_embedding.clear()
+                cleared.append("embedding")
+            except Exception as e:
+                logger.warning("Failed to clear embedding cache: %s", e)
+        if cache_llm is not None:
+            try:
+                cache_llm.clear()
+                cleared.append("llm")
+            except Exception as e:
+                logger.warning("Failed to clear LLM cache: %s", e)
+        if cache_rag is not None:
+            try:
+                cache_rag.clear()
+                cleared.append("rag")
+            except Exception as e:
+                logger.warning("Failed to clear RAG cache: %s", e)
+
+        return CacheClearResponse(
+            status="success",
+            message=f"Cache cleared: {', '.join(cleared) if cleared else 'none'}",
+        )
+
+    @router.get("/admin/stats", response_model=AdminStatsResponse)
+    def admin_stats():
+        """
+        Get overall system statistics.
+        """
+        try:
+            vector_count = vector_store.count()
+        except Exception:
+            vector_count = -1
+
+        doc_count = doc_repo.count() if doc_repo is not None else -1
+
+        cache_embedding_size = cache_embedding.size() if cache_embedding is not None else -1
+        cache_llm_size = cache_llm.size() if cache_llm is not None else -1
+        cache_rag_size = cache_rag.size() if cache_rag is not None else -1
+
+        return AdminStatsResponse(
+            vector_store_count=vector_count,
+            document_count=doc_count,
+            cache_embedding_size=cache_embedding_size,
+            cache_llm_size=cache_llm_size,
+            cache_rag_size=cache_rag_size,
+        )
 
     return router

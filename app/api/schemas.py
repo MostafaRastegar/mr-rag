@@ -109,3 +109,41 @@ class DocumentDeleteResponse(BaseModel):
     status: str
     deleted: bool
     chunks_removed: int
+
+
+# ---------------------------------------------------------------------------
+# Admin
+# ---------------------------------------------------------------------------
+
+
+class SchedulerStatusResponse(BaseModel):
+    """Response body for GET /admin/scheduler/status."""
+
+    last_fetch: str | None = None
+    total_documents: int | None = None
+    status: str | None = None
+    error_message: str | None = None
+
+
+class SchedulerRunResponse(BaseModel):
+    """Response body for POST /admin/scheduler/run."""
+
+    status: str
+    message: str
+
+
+class CacheClearResponse(BaseModel):
+    """Response body for POST /admin/cache/clear."""
+
+    status: str
+    message: str
+
+
+class AdminStatsResponse(BaseModel):
+    """Response body for GET /admin/stats."""
+
+    vector_store_count: int
+    document_count: int
+    cache_embedding_size: int
+    cache_llm_size: int
+    cache_rag_size: int
