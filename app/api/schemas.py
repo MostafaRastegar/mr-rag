@@ -78,3 +78,34 @@ class HealthResponse(BaseModel):
 
     status: str
     vector_store_count: int
+
+
+# ---------------------------------------------------------------------------
+# Document Management
+# ---------------------------------------------------------------------------
+
+
+class DocumentItem(BaseModel):
+    """A single document metadata record."""
+
+    id: str
+    filename: str
+    source_path: str
+    file_type: str
+    chunk_count: int
+    ingested_at: float
+
+
+class DocumentListResponse(BaseModel):
+    """Response body for GET /documents."""
+
+    total: int
+    documents: list[DocumentItem]
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Response body for DELETE /documents/{id}."""
+
+    status: str
+    deleted: bool
+    chunks_removed: int

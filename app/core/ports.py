@@ -9,7 +9,7 @@ on these abstractions, not on concrete implementations.
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List
 
-from app.core.domain import Chunk, Document, Message, SearchResult
+from app.core.domain import Chunk, Document, DocumentInfo, Message, SearchResult
 
 
 class EmbeddingPort(ABC):
@@ -84,6 +84,37 @@ class VectorStorePort(ABC):
         Override in adapters that support listing all IDs.
         """
         return []
+
+
+class DocumentRepositoryPort(ABC):
+    """Port for persisting and retrieving document metadata."""
+
+    @abstractmethod
+    def save(self, doc: DocumentInfo) -> None:
+        """Save a document metadata record."""
+        ...
+
+    @abstractmethod
+    def get(self, doc_id: str) -> DocumentInfo | None:
+        """Get a document metadata record by ID."""
+        ...
+
+    @abstractmethod
+    def list_all(self) -> list[DocumentInfo]:
+        """List all document metadata records."""
+        ...
+
+    @abstractmethod
+    def delete(self, doc_id: str) -> bool:
+        """Delete a document metadata record by ID. Returns True if deleted."""
+        ...
+
+    @abstractmethod
+    def count(self) -> int:
+        """Return the number of document metadata records."""
+        ...
+
+
 class LLMPort(ABC):
     """Port for generating text using a language model."""
 

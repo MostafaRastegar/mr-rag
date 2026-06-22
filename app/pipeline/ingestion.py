@@ -7,12 +7,16 @@ Depends only on abstract ports, not on concrete implementations.
 """
 
 import logging
+import time
+import uuid
+from pathlib import Path
 from typing import List
 
-from app.core.domain import Chunk, Document
+from app.core.domain import Chunk, Document, DocumentInfo
 from app.core.exceptions import IngestionError
 from app.core.ports import (
     DocumentLoaderPort,
+    DocumentRepositoryPort,
     EmbeddingPort,
     TextSplitterPort,
     VectorStorePort,
@@ -35,11 +39,13 @@ class IngestionPipeline:
         splitter: TextSplitterPort,
         embedding: EmbeddingPort,
         vector_store: VectorStorePort,
+        doc_repo: DocumentRepositoryPort | None = None,
     ) -> None:
         self._loader = loader
         self._splitter = splitter
         self._embedding = embedding
         self._vector_store = vector_store
+        self._doc_repo = doc_repo
 
     def run(self, file_path: str) -> int:
         """
@@ -93,4 +99,22 @@ class IngestionPipeline:
             raise IngestionError(f"Failed to store chunks: {e}") from e
 
         logger.info("Ingestion complete: %d chunks stored", stored)
+
+        # Step 5: Save document metadata (optional)
+        if self._doc_repo is not None:
+            try:
+                path = Path(file_path)
+                doc_info = DocumentInfo(
+                    id=str(uuid.uuid4()),
+                    filename=path.name,
+                    source_path=str(path.resolve()),
+                    file_type=path.suffix.lower().lstrip("."),
+                    chunk_count=stored,
+                    ingested_at=time.time(),
+                )
+                self._doc_repo.save(doc_info)
+                logger.info("Saved document metadata: %s (%s)", doc_info.id, doc_info.filename)
+            except Exception as e:
+                logger.warning("Failed to save document metadata: %s", e)
+
         return stored

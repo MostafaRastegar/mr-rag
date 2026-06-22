@@ -15,6 +15,9 @@ from fastapi.responses import StreamingResponse
 from app.api.schemas import (
     ChatRequest,
     ChatResponse,
+    DocumentDeleteResponse,
+    DocumentItem,
+    DocumentListResponse,
     HealthResponse,
     IngestRequest,
     IngestResponse,
@@ -29,8 +32,9 @@ from app.core.exceptions import (
     EmbeddingError,
     IngestionError,
     RetrievalError,
+    VectorStoreError,
 )
-from app.core.ports import EmbeddingPort, VectorStorePort
+from app.core.ports import DocumentRepositoryPort, EmbeddingPort, VectorStorePort
 from app.pipeline.ingestion import IngestionPipeline
 from app.pipeline.rag import RAGPipeline
 
@@ -42,6 +46,7 @@ def create_router(
     rag: RAGPipeline,
     vector_store: VectorStorePort,
     embedding: EmbeddingPort | None = None,
+    doc_repo: DocumentRepositoryPort | None = None,
 ) -> APIRouter:
     """
     Factory function to create the API router with dependency injection.
@@ -49,6 +54,9 @@ def create_router(
     Args:
         ingestion: The ingestion pipeline instance.
         rag: The RAG pipeline instance.
+        vector_store: The vector store instance.
+        embedding: Optional embedding port for the search endpoint.
+        doc_repo: Optional document repository for document management.
 
     Returns:
         A configured APIRouter with all endpoints.
@@ -213,5 +221,105 @@ def create_router(
         finally:
             if os.path.exists(tmp.name):
                 os.unlink(tmp.name)
+
+    # ------------------------------------------------------------------
+    # Document Management Endpoints
+    # ------------------------------------------------------------------
+
+    @router.get("/documents", response_model=DocumentListResponse)
+    def list_documents():
+        """
+        List all ingested documents with their metadata.
+        """
+        if doc_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Document management is not available (doc_repo not injected)",
+            )
+        try:
+            docs = doc_repo.list_all()
+            return DocumentListResponse(
+                total=len(docs),
+                documents=[
+                    DocumentItem(
+                        id=d.id,
+                        filename=d.filename,
+                        source_path=d.source_path,
+                        file_type=d.file_type,
+                        chunk_count=d.chunk_count,
+                        ingested_at=d.ingested_at,
+                    )
+                    for d in docs
+                ],
+            )
+        except Exception as e:
+            logger.exception("Failed to list documents")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/documents/{doc_id}", response_model=DocumentItem)
+    def get_document(doc_id: str):
+        """
+        Get metadata for a single ingested document.
+        """
+        if doc_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Document management is not available (doc_repo not injected)",
+            )
+        try:
+            doc = doc_repo.get(doc_id)
+            if doc is None:
+                raise HTTPException(status_code=404, detail="Document not found")
+            return DocumentItem(
+                id=doc.id,
+                filename=doc.filename,
+                source_path=doc.source_path,
+                file_type=doc.file_type,
+                chunk_count=doc.chunk_count,
+                ingested_at=doc.ingested_at,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get document")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.delete("/documents/{doc_id}", response_model=DocumentDeleteResponse)
+    def delete_document(doc_id: str):
+        """
+        Delete an ingested document and all its chunks from the vector store.
+        """
+        if doc_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Document management is not available (doc_repo not injected)",
+            )
+        try:
+            # Get document metadata first
+            doc = doc_repo.get(doc_id)
+            if doc is None:
+                raise HTTPException(status_code=404, detail="Document not found")
+
+            # Delete chunks from vector store by source_path metadata
+            chunks_removed = vector_store.delete_by_metadata(
+                "source", doc.source_path
+            )
+
+            # Delete document metadata
+            doc_repo.delete(doc_id)
+
+            return DocumentDeleteResponse(
+                status="success",
+                deleted=True,
+                chunks_removed=chunks_removed,
+            )
+        except HTTPException:
+            raise
+        except VectorStoreError as e:
+            logger.exception("Failed to delete document chunks")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Failed to delete document")
+            raise HTTPException(status_code=500, detail=str(e))
 
     return router
