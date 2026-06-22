@@ -132,3 +132,81 @@ class ChromaVectorStore(VectorStorePort):
         except Exception as e:
             logger.error("Failed to count documents: %s", str(e))
             raise VectorStoreError(f"Count failed: {e}") from e
+
+    def delete(self, ids: list[str]) -> None:
+        """
+        Delete chunks from the store by their IDs.
+
+        Args:
+            ids: List of chunk IDs to delete.
+        """
+        if not ids:
+            logger.warning("delete() called with empty ids list, skipping")
+            return
+        try:
+            collection = self._collection
+            if collection is None:
+                raise VectorStoreError("Chroma collection is not initialized")
+            collection.delete(ids=ids)
+            logger.info("Deleted %d chunks from collection '%s'", len(ids), self._collection_name)
+        except VectorStoreError:
+            raise
+        except Exception as e:
+            logger.error("Failed to delete chunks: %s", str(e))
+            raise VectorStoreError(f"Delete failed: {e}") from e
+
+    def delete_by_metadata(self, key: str, value: str) -> int:
+        """
+        Delete chunks from the store by a metadata key-value pair.
+
+        Args:
+            key: The metadata field name.
+            value: The metadata value to match.
+
+        Returns:
+            Number of deleted chunks.
+        """
+        try:
+            collection = self._collection
+            if collection is None:
+                raise VectorStoreError("Chroma collection is not initialized")
+
+            # First, find matching IDs
+            results = collection.get(where={key: value})
+            ids = results.get("ids", [])
+            if not ids:
+                logger.info(
+                    "No chunks found with metadata %s=%s in collection '%s'",
+                    key, value, self._collection_name,
+                )
+                return 0
+
+            # Delete them
+            collection.delete(ids=ids)
+            logger.info(
+                "Deleted %d chunks with metadata %s=%s from collection '%s'",
+                len(ids), key, value, self._collection_name,
+            )
+            return len(ids)
+        except VectorStoreError:
+            raise
+        except Exception as e:
+            logger.error("Failed to delete chunks by metadata: %s", str(e))
+            raise VectorStoreError(f"Delete by metadata failed: {e}") from e
+
+    def get_all_ids(self) -> list[str]:
+        """
+        Return all chunk IDs in the store.
+
+        Returns:
+            A list of all chunk IDs.
+        """
+        try:
+            collection = self._collection
+            if collection is None:
+                return []
+            results = collection.get(ids=None)
+            return results.get("ids", [])
+        except Exception as e:
+            logger.error("Failed to get all IDs: %s", str(e))
+            raise VectorStoreError(f"Get all IDs failed: {e}") from e

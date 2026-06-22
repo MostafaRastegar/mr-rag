@@ -52,7 +52,38 @@ class VectorStorePort(ABC):
         """Return the number of documents in the store."""
         ...
 
+    @abstractmethod
+    def delete(self, ids: list[str]) -> None:
+        """
+        Delete chunks from the store by their IDs.
 
+        Args:
+            ids: List of chunk IDs to delete.
+        """
+        ...
+
+    @abstractmethod
+    def delete_by_metadata(self, key: str, value: str) -> int:
+        """
+        Delete chunks from the store by a metadata key-value pair.
+
+        Args:
+            key: The metadata field name.
+            value: The metadata value to match.
+
+        Returns:
+            Number of deleted chunks.
+        """
+        ...
+
+    def get_all_ids(self) -> list[str]:
+        """
+        Return all chunk IDs in the store.
+
+        Default implementation returns an empty list.
+        Override in adapters that support listing all IDs.
+        """
+        return []
 class LLMPort(ABC):
     """Port for generating text using a language model."""
 
