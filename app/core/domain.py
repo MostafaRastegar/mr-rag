@@ -64,3 +64,23 @@ class DocumentInfo:
     file_type: str  # "json", "md", "txt"
     chunk_count: int
     ingested_at: float  # Unix timestamp
+
+
+@dataclass
+class ConversationMessage:
+    """A single message within a conversation."""
+
+    role: str  # "user" or "assistant"
+    content: str
+    timestamp: float  # Unix timestamp
+
+
+@dataclass
+class Conversation:
+    """A chat conversation with history."""
+
+    id: str
+    title: str
+    messages: list[ConversationMessage]
+    created_at: float  # Unix timestamp
+    updated_at: float  # Unix timestamp

@@ -9,7 +9,7 @@ on these abstractions, not on concrete implementations.
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List
 
-from app.core.domain import Chunk, Document, DocumentInfo, Message, SearchResult
+from app.core.domain import Chunk, Conversation, Document, DocumentInfo, Message, SearchResult
 
 
 class EmbeddingPort(ABC):
@@ -241,6 +241,35 @@ class CachePort(ABC):
         Override in adapters that can report their size.
         """
         return 0
+
+
+class ConversationRepositoryPort(ABC):
+    """Port for persisting and retrieving chat conversations."""
+
+    @abstractmethod
+    def save(self, conversation: Conversation) -> None:
+        """Save a conversation (create or update)."""
+        ...
+
+    @abstractmethod
+    def get(self, conversation_id: str) -> Conversation | None:
+        """Get a conversation by ID."""
+        ...
+
+    @abstractmethod
+    def list_all(self, limit: int = 50, offset: int = 0) -> list[Conversation]:
+        """List conversations, most recent first."""
+        ...
+
+    @abstractmethod
+    def delete(self, conversation_id: str) -> bool:
+        """Delete a conversation by ID. Returns True if deleted."""
+        ...
+
+    @abstractmethod
+    def count(self) -> int:
+        """Return the number of conversations."""
+        ...
 
 
 class DocumentLoaderPort(ABC):
