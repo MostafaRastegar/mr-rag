@@ -233,6 +233,15 @@ class CachePort(ABC):
         """
         ...
 
+    def size(self) -> int:
+        """
+        Return the approximate number of entries in the cache.
+
+        Default implementation returns 0.
+        Override in adapters that can report their size.
+        """
+        return 0
+
 
 class DocumentLoaderPort(ABC):
     """Port for loading documents from an external source."""

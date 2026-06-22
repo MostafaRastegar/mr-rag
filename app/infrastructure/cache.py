@@ -89,6 +89,14 @@ class InMemoryCacheAdapter(CachePort):
         self._cache.clear()
         logger.info("In-memory cache cleared")
 
+    def size(self) -> int:
+        """Return the approximate number of entries in the cache."""
+        try:
+            # LangChain's InMemoryCache stores entries in a dict
+            return self._cache._cache.__len__()
+        except Exception:
+            return 0
+
 
 # ---------------------------------------------------------------------------
 # Adapter: SQLiteCacheAdapter (LangChain SQLiteCache)
@@ -228,6 +236,11 @@ class SQLiteCacheAdapter(CachePort):
         if removed:
             logger.info("Cleared %d expired cache entries", removed)
         return removed
+
+    def size(self) -> int:
+        """Return the approximate number of entries in the cache."""
+        with self._lock:
+            return len(self._timestamps)
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +462,11 @@ class SemanticCacheAdapter(CachePort):
                 len(self._entries),
                 self._maxsize,
             )
+
+    def size(self) -> int:
+        """Return the number of entries in the semantic cache."""
+        with self._lock:
+            return len(self._entries)
 
     def stats(self) -> dict:
         """Return cache statistics."""
