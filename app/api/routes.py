@@ -17,6 +17,12 @@ from app.api.schemas import (
     CacheClearResponse,
     ChatRequest,
     ChatResponse,
+    ConversationCreateRequest,
+    ConversationDeleteResponse,
+    ConversationItem,
+    ConversationListResponse,
+    ConversationMessageItem,
+    ConversationUpdateRequest,
     DocumentDeleteResponse,
     DocumentItem,
     DocumentListResponse,
@@ -31,6 +37,7 @@ from app.api.schemas import (
     SourceItem,
     UploadResponse,
 )
+from app.core.domain import Conversation, ConversationMessage
 from app.core.exceptions import (
     DocumentLoadError,
     EmbeddingError,
@@ -38,7 +45,13 @@ from app.core.exceptions import (
     RetrievalError,
     VectorStoreError,
 )
-from app.core.ports import CachePort, DocumentRepositoryPort, EmbeddingPort, VectorStorePort
+from app.core.ports import (
+    CachePort,
+    ConversationRepositoryPort,
+    DocumentRepositoryPort,
+    EmbeddingPort,
+    VectorStorePort,
+)
 from app.pipeline.ingestion import IngestionPipeline
 from app.pipeline.rag import RAGPipeline
 from app.scheduler.logger import read_last_fetch
@@ -53,6 +66,7 @@ def create_router(
     vector_store: VectorStorePort,
     embedding: EmbeddingPort | None = None,
     doc_repo: DocumentRepositoryPort | None = None,
+    conversation_repo: ConversationRepositoryPort | None = None,
     cache_embedding: CachePort | None = None,
     cache_llm: CachePort | None = None,
     cache_rag: CachePort | None = None,
@@ -66,6 +80,7 @@ def create_router(
         vector_store: The vector store instance.
         embedding: Optional embedding port for the search endpoint.
         doc_repo: Optional document repository for document management.
+        conversation_repo: Optional conversation repository for chat history.
         cache_embedding: Optional embedding cache for admin stats.
         cache_llm: Optional LLM cache for admin stats.
         cache_rag: Optional RAG cache for admin stats.
@@ -426,5 +441,196 @@ def create_router(
             cache_llm_size=cache_llm_size,
             cache_rag_size=cache_rag_size,
         )
+
+    # ------------------------------------------------------------------
+    # Conversation Endpoints
+    # ------------------------------------------------------------------
+
+    @router.get("/conversations", response_model=ConversationListResponse)
+    def list_conversations(limit: int = 50, offset: int = 0):
+        """
+        List all conversations, most recent first.
+        """
+        if conversation_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Conversation history is not available (conversation_repo not injected)",
+            )
+        try:
+            convos = conversation_repo.list_all(limit=limit, offset=offset)
+            total = conversation_repo.count()
+            return ConversationListResponse(
+                total=total,
+                conversations=[
+                    ConversationItem(
+                        id=c.id,
+                        title=c.title,
+                        messages=[
+                            ConversationMessageItem(
+                                role=m.role,
+                                content=m.content,
+                                timestamp=m.timestamp,
+                            )
+                            for m in c.messages
+                        ],
+                        created_at=c.created_at,
+                        updated_at=c.updated_at,
+                    )
+                    for c in convos
+                ],
+            )
+        except Exception as e:
+            logger.exception("Failed to list conversations")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/conversations/{conv_id}", response_model=ConversationItem)
+    def get_conversation(conv_id: str):
+        """
+        Get a single conversation with all its messages.
+        """
+        if conversation_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Conversation history is not available (conversation_repo not injected)",
+            )
+        try:
+            conv = conversation_repo.get(conv_id)
+            if conv is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            return ConversationItem(
+                id=conv.id,
+                title=conv.title,
+                messages=[
+                    ConversationMessageItem(
+                        role=m.role,
+                        content=m.content,
+                        timestamp=m.timestamp,
+                    )
+                    for m in conv.messages
+                ],
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Failed to get conversation")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post("/conversations", response_model=ConversationItem, status_code=201)
+    def create_conversation(request: ConversationCreateRequest):
+        """
+        Create a new conversation.
+        """
+        if conversation_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Conversation history is not available (conversation_repo not injected)",
+            )
+        try:
+            import time
+            import uuid
+            now = time.time()
+            conv = Conversation(
+                id=str(uuid.uuid4()),
+                title=request.title,
+                messages=[
+                    ConversationMessage(
+                        role=m.role,
+                        content=m.content,
+                        timestamp=m.timestamp or now,
+                    )
+                    for m in request.messages
+                ],
+                created_at=now,
+                updated_at=now,
+            )
+            conversation_repo.save(conv)
+            return ConversationItem(
+                id=conv.id,
+                title=conv.title,
+                messages=[
+                    ConversationMessageItem(
+                        role=m.role,
+                        content=m.content,
+                        timestamp=m.timestamp,
+                    )
+                    for m in conv.messages
+                ],
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+            )
+        except Exception as e:
+            logger.exception("Failed to create conversation")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.put("/conversations/{conv_id}", response_model=ConversationItem)
+    def update_conversation(conv_id: str, request: ConversationUpdateRequest):
+        """
+        Update a conversation's title and/or messages.
+        """
+        if conversation_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Conversation history is not available (conversation_repo not injected)",
+            )
+        try:
+            import time
+            conv = conversation_repo.get(conv_id)
+            if conv is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+
+            if request.title is not None:
+                conv.title = request.title
+            if request.messages is not None:
+                conv.messages = [
+                    ConversationMessage(
+                        role=m.role,
+                        content=m.content,
+                        timestamp=m.timestamp,
+                    )
+                    for m in request.messages
+                ]
+            conv.updated_at = time.time()
+            conversation_repo.save(conv)
+            return ConversationItem(
+                id=conv.id,
+                title=conv.title,
+                messages=[
+                    ConversationMessageItem(
+                        role=m.role,
+                        content=m.content,
+                        timestamp=m.timestamp,
+                    )
+                    for m in conv.messages
+                ],
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("Failed to update conversation")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.delete("/conversations/{conv_id}", response_model=ConversationDeleteResponse)
+    def delete_conversation(conv_id: str):
+        """
+        Delete a conversation.
+        """
+        if conversation_repo is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Conversation history is not available (conversation_repo not injected)",
+            )
+        try:
+            deleted = conversation_repo.delete(conv_id)
+            return ConversationDeleteResponse(
+                status="success" if deleted else "not_found",
+                deleted=deleted,
+            )
+        except Exception as e:
+            logger.exception("Failed to delete conversation")
+            raise HTTPException(status_code=500, detail=str(e))
 
     return router

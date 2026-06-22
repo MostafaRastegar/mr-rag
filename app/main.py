@@ -19,6 +19,7 @@ from app.infrastructure.cache import (
     SQLiteCacheAdapter,
 )
 from app.infrastructure.chroma_vector_store import ChromaVectorStore
+from app.infrastructure.conversation_repository import SQLiteConversationRepository
 from app.infrastructure.document_loader import AutoDocumentLoader
 from app.infrastructure.document_repository import SQLiteDocumentRepository
 from app.infrastructure.openrouter_embedding import OpenRouterEmbedding
@@ -67,6 +68,9 @@ text_splitter = LangChainTextSplitter()
 
 # Document metadata repository
 doc_repo = SQLiteDocumentRepository()
+
+# Conversation repository
+conversation_repo = SQLiteConversationRepository()
 
 # Application pipelines
 ingestion_pipeline = IngestionPipeline(
@@ -119,6 +123,7 @@ app.include_router(
         vector_store=vector_store,
         embedding=embedding,
         doc_repo=doc_repo,
+        conversation_repo=conversation_repo,
         cache_embedding=_cache_embedding,
         cache_llm=_cache_llm,
         cache_rag=_cache_rag,

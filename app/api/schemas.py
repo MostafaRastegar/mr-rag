@@ -147,3 +147,54 @@ class AdminStatsResponse(BaseModel):
     cache_embedding_size: int
     cache_llm_size: int
     cache_rag_size: int
+
+
+# ---------------------------------------------------------------------------
+# Conversations
+# ---------------------------------------------------------------------------
+
+
+class ConversationMessageItem(BaseModel):
+    """A single message in a conversation."""
+
+    role: str
+    content: str
+    timestamp: float
+
+
+class ConversationItem(BaseModel):
+    """A single conversation record."""
+
+    id: str
+    title: str
+    messages: list[ConversationMessageItem]
+    created_at: float
+    updated_at: float
+
+
+class ConversationListResponse(BaseModel):
+    """Response body for GET /conversations."""
+
+    total: int
+    conversations: list[ConversationItem]
+
+
+class ConversationCreateRequest(BaseModel):
+    """Request body for POST /conversations."""
+
+    title: str = "New Conversation"
+    messages: list[ConversationMessageItem] = []
+
+
+class ConversationUpdateRequest(BaseModel):
+    """Request body for PUT /conversations/{id}."""
+
+    title: str | None = None
+    messages: list[ConversationMessageItem] | None = None
+
+
+class ConversationDeleteResponse(BaseModel):
+    """Response body for DELETE /conversations/{id}."""
+
+    status: str
+    deleted: bool
