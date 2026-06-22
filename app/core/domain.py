@@ -48,3 +48,19 @@ class Message:
 
     role: str  # "system", "user", "assistant"
     content: str
+
+
+@dataclass
+class DocumentInfo:
+    """
+    Metadata about an ingested document.
+
+    Tracks which files have been ingested, when, and how many chunks they produced.
+    """
+
+    id: str
+    filename: str
+    source_path: str
+    file_type: str  # "json", "md", "txt"
+    chunk_count: int
+    ingested_at: float  # Unix timestamp
