@@ -1,5 +1,5 @@
 [dependency-groups]
-dev = [
+dependencies = [
     "chromadb>=1.5.9",
     "fastapi[standard]>=0.136.3",
     "httpx>=0.28.1",

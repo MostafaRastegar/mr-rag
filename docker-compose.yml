@@ -1,19 +1,75 @@
 services:
+  # ------------------------------------------------------------------
+  # ChromaDB Vector Database
+  # ------------------------------------------------------------------
   chromadb:
-    image: docker.arvancload.ir/chromadb/chroma:latest
+    image: hub.hamdocker.ir/chromadb/chroma:latest
     ports:
       - "8000:8000"
-    network_mode: host
     volumes:
       - chroma_data:/chroma/chroma
     environment:
       - IS_PERSISTENT=TRUE
       - ALLOW_RESET=TRUE
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+      # bash's /dev/tcp — no python3/curl/wget needed in chroma image
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8000'"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    networks:
+      - app_network
+    restart: unless-stopped
 
+  # ------------------------------------------------------------------
+  # FastAPI RAG Application
+  # ------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # ChromaDB connection — use service name (DNS) inside the bridge network
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      # OpenRouter API
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      # Models
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nvidia/llama-nemotron-embed-vl-1b-v2:free}
+      - LLM_MODEL=${LLM_MODEL:-poolside/laguna-m.1:free}
+      # App
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8080
+      # Caching
+      - CACHE_TYPE=${CACHE_TYPE:-memory}
+      - CACHE_SEMANTIC_ENABLED=${CACHE_SEMANTIC_ENABLED:-true}
+      - CACHE_SEMANTIC_THRESHOLD=${CACHE_SEMANTIC_THRESHOLD:-0.92}
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; r=urllib.request.urlopen(\"http://localhost:8080/health\"); assert r.status==200'"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - app_network
+    restart: unless-stopped
+
+# ------------------------------------------------------------------
+# Network — shared bridge for inter-service DNS resolution
+# ------------------------------------------------------------------
+networks:
+  app_network:
+    driver: bridge
+
+# ------------------------------------------------------------------
+# Persistent Volumes
+# ------------------------------------------------------------------
 volumes:
   chroma_data:
