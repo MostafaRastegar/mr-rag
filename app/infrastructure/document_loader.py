@@ -16,6 +16,7 @@ from langchain_community.document_loaders import JSONLoader, TextLoader
 from app.core.domain import Document
 from app.core.exceptions import DocumentLoadError
 from app.core.ports import DocumentLoaderPort
+from app.infrastructure.pdf_loader import PDFDocumentLoader
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 _SUPPORTED_EXTENSIONS: dict[str, str] = {
     ".json": "JSON",
     ".md": "Markdown",
+    ".pdf": "PDF",
     ".txt": "Plain Text",
 }
 
@@ -398,6 +400,7 @@ class AutoDocumentLoader(DocumentLoaderPort):
         self._loaders: dict[str, DocumentLoaderPort] = {
             ".json": JsonDocumentLoader(),
             ".md": MarkdownDocumentLoader(),
+            ".pdf": PDFDocumentLoader(),
             ".txt": TextDocumentLoader(),
         }
 
