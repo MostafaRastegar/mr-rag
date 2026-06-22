@@ -159,7 +159,7 @@ class ConversationMessageItem(BaseModel):
 
     role: str
     content: str
-    timestamp: float
+    timestamp: float | None = None
 
 
 class ConversationItem(BaseModel):
