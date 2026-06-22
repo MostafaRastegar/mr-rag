@@ -93,6 +93,7 @@ Response:
 |--------|-----------|--------|-------------|
 | JSON | `.json` | LangChain JSONLoader | List of objects with `content` or `text` field |
 | Markdown | `.md` | MarkdownHeaderTextSplitter | Splits by headings (#, ##, ###, etc.) |
+| PDF | `.pdf` | PyMuPDF (fitz) | One document per page with page metadata |
 | Plain Text | `.txt` | LangChain TextLoader | Entire file as one document |
 
 **JSON format example:**

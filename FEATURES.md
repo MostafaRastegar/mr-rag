@@ -91,6 +91,7 @@ All settings are configurable via `.env` file.
 |--------|-----------|--------|-------------|
 | JSON | `.json` | LangChain JSONLoader | Objects with `content` or `text` field + metadata |
 | Markdown | `.md` | MarkdownHeaderTextSplitter | Splits by headings (#, ##, ###, etc.) |
+| PDF | `.pdf` | PyMuPDF (fitz) | One document per page with page metadata |
 | Plain Text | `.txt` | LangChain TextLoader | Entire file as one document |
 
 Easy to extend — add a new loader by implementing `DocumentLoaderPort`.
