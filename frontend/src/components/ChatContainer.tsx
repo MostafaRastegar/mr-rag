@@ -8,6 +8,8 @@ import {
   RotateCcw,
   Upload,
   Search,
+  FileText,
+  Activity,
 } from "lucide-react";
 import ChatInput from "./ChatInput";
 import MessageBubble from "./MessageBubble";
@@ -16,6 +18,8 @@ import Sidebar from "./Sidebar";
 import FileUpload from "./FileUpload";
 import type { UploadResult } from "./FileUpload";
 import SearchPanel from "./SearchPanel";
+import DocumentsPanel from "./DocumentsPanel";
+import AdminPanel from "./AdminPanel";
 import { sendChat, chatStream, getHealth } from "@/lib/api";
 import type { HealthResponse } from "@/lib/api";
 import { getConversation, saveConversation } from "@/lib/db";
@@ -64,6 +68,8 @@ export default function ChatContainer() {
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [showUpload, setShowUpload] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showDocuments, setShowDocuments] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef(messages);
@@ -366,6 +372,10 @@ export default function ChatContainer() {
       )}
 
       {showSearch && <SearchPanel onClose={() => setShowSearch(false)} />}
+      {showDocuments && (
+        <DocumentsPanel onClose={() => setShowDocuments(false)} />
+      )}
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
 
       <div className="mx-auto flex h-dvh w-full max-w-3xl flex-col">
         {/* header */}
@@ -393,6 +403,26 @@ export default function ChatContainer() {
             >
               <Upload size={13} />
               سند
+            </button>
+
+            {/* documents button */}
+            <button
+              onClick={() => setShowDocuments(true)}
+              className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              title="مدیریت اسناد"
+            >
+              <FileText size={13} />
+              اسناد
+            </button>
+
+            {/* admin button */}
+            <button
+              onClick={() => setShowAdmin(true)}
+              className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              title="پنل مدیریت"
+            >
+              <Activity size={13} />
+              مدیریت
             </button>
 
             {/* health badge */}
