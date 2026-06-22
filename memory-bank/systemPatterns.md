@@ -8,7 +8,8 @@ The project follows a strict hexagonal architecture with clean separation betwee
 ┌──────────────────────────────────────────────────────────────┐
 │                      API Layer                                │
 │  app/main.py  →  app/api/routes.py  →  schemas.py            │
-│  Endpoints: /health, /ingest, /chat, /chat/stream             │
+│  Endpoints: /health, /ingest, /chat, /chat/stream,           │
+│             /documents, /conversations, /admin/*, /metrics    │
 └───────────────────────────┬──────────────────────────────────┘
                             │ depends on
 ┌───────────────────────────▼──────────────────────────────────┐
@@ -23,18 +24,26 @@ The project follows a strict hexagonal architecture with clean separation betwee
 │  openrouter_embedding.py  (implements EmbeddingPort)          │
 │  openrouter_llm.py        (implements LLMPort + streaming)   │
 │  chroma_vector_store.py   (implements VectorStorePort)        │
+│    — delete(), delete_by_metadata(), get_all_ids()            │
 │  document_loader.py       (implements DocLoaderPort)          │
-│    — AutoDocumentLoader: JSON, Markdown, Plain Text           │
+│    — AutoDocumentLoader: JSON, Markdown, PDF, Plain Text      │
 │  text_splitter.py         (implements TextSplitterPort)       │
 │    — UUID-based chunk IDs                                     │
 │  cache.py                 (implements CachePort)              │
+│    — InMemoryCacheAdapter, SQLiteCacheAdapter,                │
+│      SemanticCacheAdapter (hybrid exact + semantic)           │
+│  document_repository.py   (implements DocumentRepositoryPort) │
+│    — SQLiteDocumentRepository                                 │
+│  conversation_repository.py (implements ConversationRepoPort) │
+│    — SQLiteConversationRepository                             │
 └───────────────────────────┬──────────────────────────────────┘
                             │ defined in
 ┌───────────────────────────▼──────────────────────────────────┐
 │                      Core Layer                               │
 │  domain.py      — Data classes (Document, Chunk, SearchResult│
-│                   Answer, Message)                            │
-│  ports.py       — Abstract interfaces (6 Ports)              │
+│                   Answer, Message, DocumentInfo,              │
+│                   Conversation, ConversationMessage)          │
+│  ports.py       — Abstract interfaces (8 Ports)              │
 │  exceptions.py  — Custom exception hierarchy                 │
 └──────────────────────────────────────────────────────────────┘
 

@@ -20,6 +20,7 @@
 | pydantic-settings | ≥2.14.1 | Environment variable loading |
 | python-multipart | ≥0.0.32 | Form data parsing |
 | python-dotenv | ≥1.2.2 | .env file loading |
+| PyMuPDF | ≥1.24.0 | PDF document loading |
 
 ## Project Structure
 

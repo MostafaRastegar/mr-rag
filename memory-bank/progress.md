@@ -52,6 +52,41 @@
 ### Chunk IDs
 - UUID-based: `chunk_{uuid4_hex[:12]}_{index}` — eliminates collision risk on re-ingestion
 
+### Vector Store CRUD (Feature 1)
+- `delete(ids)` — delete chunks by IDs
+- `delete_by_metadata(key, value)` — delete chunks by metadata key-value
+- `get_all_ids()` — list all chunk IDs
+
+### Document Management (Feature 2)
+- `GET /documents` — list all ingested documents with metadata
+- `GET /documents/{id}` — get single document metadata
+- `DELETE /documents/{id}` — delete document and its chunks from vector store
+- SQLite-backed document metadata tracking (`data/document_metadata.db`)
+
+### Admin Endpoints (Feature 3)
+- `POST /admin/scheduler/run` — manually trigger scheduler job
+- `GET /admin/scheduler/status` — get last fetch log
+- `POST /admin/cache/clear` — clear all cache layers
+- `GET /admin/stats` — system statistics (vector count, doc count, cache sizes)
+- `size()` method added to all cache adapters for stats reporting
+
+### Conversation History (Feature 4)
+- `GET /conversations` — list all conversations
+- `GET /conversations/{id}` — get single conversation with messages
+- `POST /conversations` — create new conversation
+- `PUT /conversations/{id}` — update conversation title/messages
+- `DELETE /conversations/{id}` — delete conversation
+- SQLite-backed conversation storage (`data/conversations.db`)
+
+### Metrics/Monitoring (Feature 5)
+- `GET /metrics` — Prometheus-style metrics endpoint
+- Metrics: vector_store_count, document_count, conversation_count, cache sizes
+
+### PDF Support (Feature 6)
+- `PDFDocumentLoader` using PyMuPDF (fitz)
+- One Document per page with page number metadata
+- Registered in `AutoDocumentLoader` for `.pdf` files
+
 ## What's Left to Build / Fix
 
 ### High Priority
@@ -60,14 +95,10 @@
 
 ### Medium Priority
 - [ ] **Error handling in ChromaVectorStore** — `add()` now checks for None collection, but could be more robust
-- [ ] **Scheduler admin endpoint** — `POST /scheduler/run` for manual trigger
-- [ ] **Scheduler status endpoint** — `GET /scheduler/status` for last fetch log
 
 ### Low Priority
 - [ ] **Rate limiting** — No rate limiting on API endpoints
 - [ ] **Authentication** — No API key protection on endpoints
-- [ ] **Metrics/monitoring** — No request metrics or tracing
-- [ ] **Admin cache-clear endpoint** — No way to invalidate cache from API
 - [ ] **Docker compose for scheduler** — Could be added as a separate service
 
 ## Known Issues

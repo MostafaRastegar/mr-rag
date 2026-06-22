@@ -2,13 +2,17 @@
 
 ## Objective
 Build a production-ready RAG (Retrieval-Augmented Generation) system that:
-- Ingests JSON, Markdown, and Plain Text data from files or an external web scraper via a periodic cron scheduler
+- Ingests JSON, Markdown, PDF, and Plain Text data from files or an external web scraper via a periodic cron scheduler
 - Chunks text with optimized parameters
 - Creates embeddings via OpenRouter API
 - Stores vectors in ChromaDB (Docker)
 - Answers questions with cached responses and semantic matching
 - Supports streaming responses for long answers
 - Three-stage cascading retrieval for synonym-aware question answering
+- Document management with metadata tracking
+- Conversation history persistence
+- Admin endpoints for monitoring and control
+- Prometheus-style metrics
 - All orchestrated with Docker Compose
 
 ## Repository

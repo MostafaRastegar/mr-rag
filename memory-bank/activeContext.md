@@ -1,7 +1,7 @@
 # Active Context
 
 ## Current Focus
-**Multi-format document loading + UUID chunk IDs** — AutoDocumentLoader added (JSON, Markdown, Plain Text), UUID-based chunk IDs implemented
+**Medium-priority features completed** — Vector Store CRUD, Document Management, Admin Endpoints, Conversation History, Metrics/Monitoring, and PDF Support have all been implemented and merged to main.
 
 ## What Has Been Built
 
@@ -129,4 +129,3 @@
 ## Next Steps
 - [ ] Dockerfile sync (requirements.txt vs pyproject.toml)
 - [ ] Integration tests
-- [ ] Admin endpoints for scheduler: POST /scheduler/run, GET /scheduler/status
