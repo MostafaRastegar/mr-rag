@@ -72,7 +72,7 @@ class ConversationMessage:
 
     role: str  # "user" or "assistant"
     content: str
-    timestamp: float  # Unix timestamp
+    timestamp: float | None = None  # Unix timestamp
 
 
 @dataclass

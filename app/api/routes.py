@@ -9,7 +9,7 @@ import logging
 import os
 import tempfile
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.api.schemas import (
@@ -632,5 +632,50 @@ def create_router(
         except Exception as e:
             logger.exception("Failed to delete conversation")
             raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/metrics")
+    def metrics():
+        """
+        Prometheus-style metrics endpoint.
+
+        Returns basic system metrics in text format.
+        """
+        try:
+            vector_count = vector_store.count()
+        except Exception:
+            vector_count = -1
+
+        doc_count = doc_repo.count() if doc_repo is not None else -1
+        conv_count = conversation_repo.count() if conversation_repo is not None else -1
+
+        cache_embedding_size = cache_embedding.size() if cache_embedding is not None else 0
+        cache_llm_size = cache_llm.size() if cache_llm is not None else 0
+        cache_rag_size = cache_rag.size() if cache_rag is not None else 0
+
+        metrics_text = f"""# HELP rag_vector_store_count Number of chunks in vector store
+# TYPE rag_vector_store_count gauge
+rag_vector_store_count {vector_count}
+
+# HELP rag_document_count Number of ingested documents
+# TYPE rag_document_count gauge
+rag_document_count {doc_count}
+
+# HELP rag_conversation_count Number of conversations
+# TYPE rag_conversation_count gauge
+rag_conversation_count {conv_count}
+
+# HELP rag_cache_embedding_size Number of entries in embedding cache
+# TYPE rag_cache_embedding_size gauge
+rag_cache_embedding_size {cache_embedding_size}
+
+# HELP rag_cache_llm_size Number of entries in LLM cache
+# TYPE rag_cache_llm_size gauge
+rag_cache_llm_size {cache_llm_size}
+
+# HELP rag_cache_rag_size Number of entries in RAG cache
+# TYPE rag_cache_rag_size gauge
+rag_cache_rag_size {cache_rag_size}
+"""
+        return Response(content=metrics_text, media_type="text/plain")
 
     return router
