@@ -40,7 +40,7 @@ class OpenRouterLLM(LLMPort):
         api_key: str | None = None,
         base_url: str | None = None,
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int = settings.response_max_token,
         cache: CachePort | None = None,
     ) -> None:
         self.model = model or settings.llm_model
@@ -83,7 +83,7 @@ class OpenRouterLLM(LLMPort):
         self,
         messages: List[Message],
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int = settings.response_max_token,
     ) -> str:
         """
         Generate a response from the language model.
@@ -150,7 +150,7 @@ class OpenRouterLLM(LLMPort):
         self,
         messages: List[Message],
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int = settings.response_max_token,
     ) -> AsyncGenerator[str, None]:
         """
         Generate a streaming response from the language model.

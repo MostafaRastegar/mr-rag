@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     chunk_overlap: int = 100
 
     # Retrieval
-    top_k: int = 3
+    response_max_token: int = 2048
+    top_k: int = 5
     retrieval_min_score: float = (
         0.15  # minimum cosine score to include a chunk in context
     )
