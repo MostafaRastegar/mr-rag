@@ -217,7 +217,7 @@ def create_router(
         """
         # validate extension
         ext = os.path.splitext(file.filename or "")[1].lower()
-        if ext not in (".json", ".md", ".txt"):
+        if ext not in (".json", ".md", ".txt", ".pdf"):
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported file type '{ext}'. Use .json, .md, or .txt",

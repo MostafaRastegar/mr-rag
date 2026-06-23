@@ -1,4 +1,9 @@
-[dependency-groups]
+[project]
+name = "mr-rag"
+version = "0.1.0"
+description = "AI RAG_PIPLINE"
+readme = "README.md"
+requires-python = ">=3.10"
 dependencies = [
     "chromadb>=1.5.9",
     "fastapi[standard]>=0.136.3",
@@ -11,6 +16,7 @@ dependencies = [
     "langchain-openai>=1.2.2",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.14.1",
+    "pymupdf>=1.27.2.3",
     "python-dotenv>=1.2.2",
     "python-multipart>=0.0.32",
     "schedule>=1.2.2",

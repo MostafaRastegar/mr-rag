@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import {
   ChevronDown,
   ChevronUp,
@@ -22,6 +25,87 @@ export interface Message {
 interface MessageBubbleProps {
   message: Message;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Custom Markdown components                                        */
+/* ------------------------------------------------------------------ */
+
+function CodeBlock({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  const match = /language-(\w+)/.exec(className ?? "");
+  const code = String(children ?? "").replace(/\n$/, "");
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = code;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="group relative my-3 overflow-hidden rounded-xl border border-zinc-300 dark:border-zinc-600" dir="ltr">
+      {/* header bar */}
+      {match && (
+        <div className="flex items-center justify-between bg-zinc-200 px-3 py-1.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
+          <span>{match[1]}</span>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity hover:bg-zinc-300 group-hover:opacity-100 dark:hover:bg-zinc-600"
+          >
+            {copied ? <Check size={11} /> : <Copy size={11} />}
+            {copied ? "کپی شد" : "کپی"}
+          </button>
+        </div>
+      )}
+      <pre className="overflow-x-auto p-3 text-xs leading-relaxed">
+        <code className={className}>
+          {children}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
+function InlineCode(props: React.HTMLProps<HTMLElement>) {
+  return (
+    <code
+      className="rounded-md bg-zinc-200 px-1.5 py-0.5 text-xs font-mono text-zinc-800 dark:bg-zinc-700 dark:text-zinc-200"
+      dir="ltr"
+      {...props}
+    />
+  );
+}
+
+function Table(props: React.HTMLProps<HTMLTableElement>) {
+  return (
+    <div className="my-3 overflow-x-auto" dir="ltr">
+      <table
+        className="w-full border-collapse text-xs"
+        {...props}
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Component                                                          */
+/* ------------------------------------------------------------------ */
 
 export default function MessageBubble({ message }: MessageBubbleProps) {
   const [showSources, setShowSources] = useState(false);
@@ -46,6 +130,21 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  const markdownComponents = useMemo(
+    () => ({
+      code({ className, children }: { className?: string; children?: React.ReactNode }) {
+        const isInline = !className?.startsWith("language-");
+        return isInline ? (
+          <InlineCode className={className}>{children}</InlineCode>
+        ) : (
+          <CodeBlock className={className}>{children}</CodeBlock>
+        );
+      },
+      table: Table,
+    }),
+    [],
+  );
 
   return (
     <div dir="rtl" className="flex justify-start">
@@ -72,9 +171,21 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           </button>
         )}
 
-        {/* text */}
-        <div className="whitespace-pre-wrap break-words">
-          {message.text || (message.streaming ? "" : "...")}
+        {/* text — rendered as Markdown */}
+        <div className="markdown-body">
+          {message.text ? (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight]}
+              components={markdownComponents}
+            >
+              {message.text}
+            </ReactMarkdown>
+          ) : message.streaming ? (
+            ""
+          ) : (
+            "..."
+          )}
           {message.streaming && (
             <span className="inline-block h-3 w-1 animate-pulse bg-current" />
           )}
@@ -110,7 +221,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                     <p className="mt-1 leading-relaxed text-zinc-600 dark:text-zinc-300 line-clamp-3">
                       {src.content}
                     </p>
-                    {src.metadata?.title && (
+                    {src.metadata?.title != null && typeof src.metadata.title === "string" && (
                       <p className="mt-1 text-[10px] text-zinc-400">
                         {src.metadata.title as string}
                       </p>

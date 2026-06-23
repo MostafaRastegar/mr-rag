@@ -87,7 +87,7 @@ class OpenRouterEmbedding(EmbeddingPort):
                     "model": self.model,
                     "input": texts,
                 },
-                timeout=60,
+                timeout=360,
             )
             response.raise_for_status()
             data = response.json()

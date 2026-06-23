@@ -26,7 +26,7 @@ interface FileUploadProps {
   onClose: () => void;
 }
 
-const ALLOWED_EXTENSIONS = [".json", ".md", ".txt"];
+const ALLOWED_EXTENSIONS = [".json", ".md", ".txt", ".pdf"];
 
 export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
   const [status, setStatus] = useState<Status>("idle");
@@ -135,11 +135,11 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
             <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
               فایل را اینجا رها کنید یا کلیک کنید
             </p>
-            <p className="mt-1 text-[10px] text-zinc-400">JSON ‌• MD ‌• TXT</p>
+            <p className="mt-1 text-[10px] text-zinc-400">JSON ‌• MD ‌• TXT • PDF</p>
             <input
               ref={inputRef}
               type="file"
-              accept=".json,.md,.txt"
+              accept=".json,.md,.txt,.pdf"
               className="hidden"
               onChange={handleSelect}
             />
