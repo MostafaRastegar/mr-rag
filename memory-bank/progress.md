@@ -56,6 +56,7 @@
 - `delete(ids)` — delete chunks by IDs
 - `delete_by_metadata(key, value)` — delete chunks by metadata key-value
 - `get_all_ids()` — list all chunk IDs
+- `get_all_chunks()` — return all chunks with metadata
 
 ### Document Management (Feature 2)
 - `GET /documents` — list all ingested documents with metadata
@@ -87,11 +88,18 @@
 - One Document per page with page number metadata
 - Registered in `AutoDocumentLoader` for `.pdf` files
 
+### Chunk Metadata Coordination Fix (Feature 7)
+- **Bug fixed**: `DELETE /documents/{id}` now uses `delete_by_metadata("original_filename", ...)` instead of `delete_by_metadata("source", ...)` which mismatched with loaders' `source: path.name`
+- Ingestion pipeline injects both `original_filename` and `source_path` into every chunk's metadata
+- Admin chunk APIs: `GET /admin/chunks`, `DELETE /admin/chunks/{chunk_id}` for direct chunk management
+- Cleanup script: `scripts/cleanup_orphans.py` with `--dry-run` support
+
 ## What's Left to Build / Fix
 
 ### High Priority
 - [ ] **Dockerfile** — needs `requirements.txt` sync with `pyproject.toml` (still uses `pip install -r requirements.txt` but project uses UV/pyproject.toml)
 - [ ] **End-to-end integration test** — No test suite exists
+- [ ] **Run cleanup script** — Run `scripts/cleanup_orphans.py` on existing ChromaDB data to remove orphaned chunks
 
 ### Medium Priority
 - [ ] **Error handling in ChromaVectorStore** — `add()` now checks for None collection, but could be more robust
@@ -106,6 +114,7 @@
 2. **Semantic cache is O(n)** — Linear scan of all entries. Fine for 500 entries, but may need optimization for larger caches
 3. **Streaming response is synchronous for cache hits** — Full answer is buffered and yielded as one chunk
 4. **Dockerfile uses requirements.txt** — But project uses UV/pyproject.toml; needs sync
+5. **Orphaned chunks may exist** — Pre-fix, chunks were stored with `source: tmpXXX.pdf` but delete searched by full temp path → some orphaned chunks may remain in ChromaDB
 
 ## Evolution of Decisions
 | Date | Decision | Rationale |
@@ -125,3 +134,7 @@
 | 2026-06-16 | UUID-based chunk IDs (`uuid.uuid4().hex[:12]`) | Eliminates collision risk on re-ingestion |
 | 2026-06-16 | retrieval_min_score lowered from 0.25 → 0.15 | Catch more potentially relevant chunks |
 | 2026-06-16 | LLM model changed to poolside/laguna-m.1:free | Free-tier model availability |
+| 2026-06-23 | Chunk metadata bug fix: delete_by_metadata uses original_filename | Loaders set `source: path.name` but delete searched by full temp path |
+| 2026-06-23 | `get_all_chunks()` added to VectorStorePort + ChromaVectorStore | Enables admin chunk listing and orphan cleanup |
+| 2026-06-23 | Admin chunk APIs: GET/DELETE /admin/chunks | Direct chunk management for debugging |
+| 2026-06-23 | scripts/cleanup_orphans.py created | Find and remove orphaned chunks |

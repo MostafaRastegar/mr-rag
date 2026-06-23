@@ -24,7 +24,8 @@ The project follows a strict hexagonal architecture with clean separation betwee
 │  openrouter_embedding.py  (implements EmbeddingPort)          │
 │  openrouter_llm.py        (implements LLMPort + streaming)   │
 │  chroma_vector_store.py   (implements VectorStorePort)        │
-│    — delete(), delete_by_metadata(), get_all_ids()            │
+│    — delete(), delete_by_metadata(), get_all_ids(),           │
+│      get_all_chunks()                                         │
 │  document_loader.py       (implements DocLoaderPort)          │
 │    — AutoDocumentLoader: JSON, Markdown, PDF, Plain Text      │
 │  text_splitter.py         (implements TextSplitterPort)       │
@@ -123,6 +124,12 @@ Layer 3: RAG Q&A Cache (two sub-layers):
 - Format: `chunk_{uuid4_hex[:12]}_{index}`
 - Eliminates collision risk on re-ingestion
 - Prevents duplicate chunks in ChromaDB
+
+### 10. Document Deletion via Metadata Coordination
+- **Problem**: Loaders store `"source": path.name` (e.g. `tmpXXX.pdf`) in chunk metadata, but `DELETE /documents/{id}` was looking up by `doc.source_path` (full temp path `/tmp/tmpXXX.pdf`)
+- **Fix**: Ingestion pipeline injects `"original_filename"` into every chunk's metadata; delete now matches on `original_filename`
+- **Admin Chunk APIs**: `GET /admin/chunks` for inspection, `DELETE /admin/chunks/{chunk_id}` for targeted removal
+- **Cleanup Script**: `scripts/cleanup_orphans.py` identifies chunks whose `original_filename` has no matching SQLite document
 
 ## SOLID Principles
 

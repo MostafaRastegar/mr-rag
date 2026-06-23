@@ -30,9 +30,18 @@ Three-stage cascade to handle questions with synonyms or out-of-context queries:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Service health check |
-| `POST` | `/ingest` | Load a file (JSON/MD/TXT), chunk, embed, and index it |
+| `POST` | `/ingest` | Load a file (JSON/MD/TXT/PDF), chunk, embed, and index it |
 | `POST` | `/chat` | Ask a question, get a complete answer |
 | `POST` | `/chat/stream` | Ask a question, get a streaming (SSE) answer |
+| `POST` | `/upload` | Upload a file and ingest it |
+| `GET` | `/documents` | List all ingested documents |
+| `DELETE` | `/documents/{id}` | Delete a document and its chunks |
+| `GET` | `/admin/chunks` | List all chunks with metadata |
+| `DELETE` | `/admin/chunks/{id}` | Delete a single chunk by ID |
+| `POST` | `/admin/scheduler/run` | Manually trigger scheduler |
+| `GET` | `/admin/scheduler/status` | Get last fetch status |
+| `POST` | `/admin/cache/clear` | Clear all caches |
+| `GET` | `/admin/stats` | System statistics |
 
 ### Scheduler
 ```bash

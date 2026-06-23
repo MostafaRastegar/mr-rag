@@ -53,6 +53,31 @@ The API is now available at `http://localhost:8080`. OpenAPI docs at `http://loc
 
 ## API Endpoints
 
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Service health check |
+| `POST` | `/ingest` | Ingest a file (JSON/MD/TXT/PDF) → chunk → embed → store |
+| `POST` | `/chat` | Ask a question, get a complete answer |
+| `POST` | `/chat/stream` | Ask a question, get a streaming (SSE) answer |
+| `POST` | `/upload` | Upload a file and ingest it (auto temp cleanup) |
+| `GET` | `/documents` | List all ingested documents |
+| `GET` | `/documents/{id}` | Get single document metadata |
+| `DELETE` | `/documents/{id}` | Delete document + its chunks from ChromaDB |
+| `GET` | `/conversations` | List all conversations |
+| `GET` | `/conversations/{id}` | Get single conversation with messages |
+| `POST` | `/conversations` | Create new conversation |
+| `PUT` | `/conversations/{id}` | Update conversation title or messages |
+| `DELETE` | `/conversations/{id}` | Delete conversation |
+| `GET` | `/admin/chunks` | List all chunks with metadata |
+| `DELETE` | `/admin/chunks/{id}` | Delete a single chunk by ID |
+| `POST` | `/admin/scheduler/run` | Manually trigger scheduler |
+| `GET` | `/admin/scheduler/status` | Last scheduler fetch log |
+| `POST` | `/admin/cache/clear` | Clear all cache layers |
+| `GET` | `/admin/stats` | System statistics (vector count, doc count, cache sizes) |
+| `GET` | `/metrics` | Prometheus-style metrics |
+
+---
+
 ### Health Check
 
 ```bash
@@ -71,7 +96,7 @@ Response:
 
 ### Ingest Data
 
-Load a file (JSON, Markdown, or Plain Text), split it into chunks, embed, and store in ChromaDB.
+Load a file (JSON, Markdown, PDF, or Plain Text), split it into chunks, embed, and store in ChromaDB.
 
 ```bash
 curl -X POST http://localhost:8080/ingest \
@@ -154,6 +179,152 @@ Fesenj
 ```
 
 **Note:** The `-N` flag disables curl's buffering for real-time display.
+
+---
+
+### Upload File
+
+Upload a file via HTTP multipart. Automatically detects type by extension, saves to temp, ingests, and cleans up.
+
+```bash
+curl -X POST http://localhost:8080/upload \
+  -F "file=@data/recipes_1.json"
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "file_name": "recipes_1.json",
+  "chunks_ingested": 47,
+  "message": "فایل با موفقیت بارگذاری شد. 47 قطعه استخراج شد."
+}
+```
+
+Supported formats: `.json`, `.md`, `.txt`, `.pdf`
+
+---
+
+### Document Management
+
+List, inspect, and delete ingested documents.
+
+```bash
+# List all documents
+curl http://localhost:8080/documents
+
+# Get single document metadata
+curl http://localhost:8080/documents/<doc-id>
+
+# Delete document + its chunks from ChromaDB
+curl -X DELETE http://localhost:8080/documents/<doc-id>
+```
+
+Response (list):
+```json
+{
+  "total": 3,
+  "documents": [
+    {
+      "id": "uuid-...",
+      "filename": "tmpabc123.json",
+      "original_filename": "recipes_1.json",
+      "source_path": "/tmp/tmpabc123.json",
+      "file_type": "json",
+      "chunk_count": 47,
+      "ingested_at": 1718000000.0
+    }
+  ]
+}
+```
+
+---
+
+### Admin: Chunk Management
+
+Inspect and delete individual chunks directly in ChromaDB.
+
+```bash
+# List all chunks (id, text preview, full metadata)
+curl http://localhost:8080/admin/chunks
+
+# Delete a single chunk by ID
+curl -X DELETE http://localhost:8080/admin/chunks/<chunk-id>
+```
+
+Useful for debugging orphaned chunks or manual cleanup.
+
+---
+
+### Admin: Scheduler Control
+
+Manually trigger the scheduler job or check its status.
+
+```bash
+# Trigger scheduler now
+curl -X POST http://localhost:8080/admin/scheduler/run
+
+# Check last fetch status
+curl http://localhost:8080/admin/scheduler/status
+```
+
+---
+
+### Admin: Cache & Stats
+
+```bash
+# Clear all cache layers (embedding, LLM, RAG)
+curl -X POST http://localhost:8080/admin/cache/clear
+
+# System statistics
+curl http://localhost:8080/admin/stats
+
+# Prometheus-style metrics
+curl http://localhost:8080/metrics
+```
+
+---
+
+### Conversation History
+
+Persist and retrieve chat conversations.
+
+```bash
+# List all conversations
+curl http://localhost:8080/conversations
+
+# Get single conversation with messages
+curl http://localhost:8080/conversations/<conv-id>
+
+# Create new conversation
+curl -X POST http://localhost:8080/conversations \
+  -H "Content-Type: application/json" \
+  -d '{"title": "My Chat", "messages": [{"role": "user", "content": "Hello"}]}'
+
+# Update conversation (title or messages)
+curl -X PUT http://localhost:8080/conversations/<conv-id> \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Updated Title"}'
+
+# Delete conversation
+curl -X DELETE http://localhost:8080/conversations/<conv-id>
+```
+
+---
+
+### Cleanup Orphaned Chunks
+
+If chunks remain in ChromaDB after their source document was deleted (common before the metadata fix), use the cleanup script:
+
+```bash
+# Preview orphans without deleting
+python -m scripts.cleanup_orphans --dry-run
+
+# Delete all orphaned chunks
+python -m scripts.cleanup_orphans
+```
+
+The script compares each chunk's `original_filename` against documents in SQLite and removes unmatched chunks.
 
 ---
 
@@ -269,8 +440,11 @@ mr-rag/
 │   │   └── ports.py            # Abstract interfaces (6 ports)
 │   ├── infrastructure/         # Adapters (external integrations)
 │   │   ├── cache.py            # InMemoryCacheAdapter, SQLiteCacheAdapter, SemanticCacheAdapter
-│   │   ├── chroma_vector_store.py
-│   │   ├── document_loader.py  # AutoDocumentLoader (JSON, Markdown, Plain Text)
+│   │   ├── chroma_vector_store.py  # ChromaDB CRUD + get_all_chunks()
+│   │   ├── document_loader.py  # AutoDocumentLoader (JSON, Markdown, PDF, Plain Text)
+│   │   ├── document_repository.py # SQLite document metadata
+│   │   ├── conversation_repository.py # SQLite conversation history
+│   │   ├── pdf_loader.py       # PyMuPDF-based PDF loader
 │   │   ├── openrouter_embedding.py
 │   │   ├── openrouter_llm.py
 │   │   └── text_splitter.py    # UUID-based chunk IDs
@@ -288,6 +462,8 @@ mr-rag/
 │   └── main.py                 # FastAPI app + DI wiring
 ├── data/                       # JSON data files
 ├── memory-bank/                # Project documentation
+├── scripts/
+│   └── cleanup_orphans.py      # Orphaned chunk cleanup utility
 ├── FEATURES.md                 # Feature overview
 ├── USAGE.md                    # Usage guide
 ├── docker-compose.yml

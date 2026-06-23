@@ -62,6 +62,8 @@ mr-rag/
 ├── data/
 │   └── recipes_*.json         # Example data files
 ├── memory-bank/               # Project documentation
+├── scripts/
+│   └── cleanup_orphans.py     # Orphaned chunk cleanup utility
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pyproject.toml
@@ -141,9 +143,20 @@ python -m app.scheduler.runner
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Service health check |
-| `POST` | `/ingest` | Ingest a file (JSON/MD/TXT) → chunk → embed → store |
+| `POST` | `/ingest` | Ingest a file (JSON/MD/TXT/PDF) → chunk → embed → store |
 | `POST` | `/chat` | Answer a question (full response) |
 | `POST` | `/chat/stream` | Answer a question (streaming SSE) |
+| `POST` | `/upload` | Upload file (JSON/MD/TXT/PDF) → ingest → cleanup temp |
+| `GET` | `/documents` | List ingested documents with metadata |
+| `GET` | `/documents/{id}` | Get single document metadata |
+| `DELETE` | `/documents/{id}` | Delete document + chunks from ChromaDB |
+| `GET` | `/admin/chunks` | List all chunks in ChromaDB with metadata |
+| `DELETE` | `/admin/chunks/{id}` | Delete a single chunk by ID |
+| `POST` | `/admin/scheduler/run` | Manually trigger scheduler job |
+| `GET` | `/admin/scheduler/status` | Last scheduler fetch log |
+| `POST` | `/admin/cache/clear` | Clear all cache layers |
+| `GET` | `/admin/stats` | System statistics |
+| `GET` | `/metrics` | Prometheus-style metrics |
 
 ### Example: Ingest Data
 ```bash

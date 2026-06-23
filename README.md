@@ -180,3 +180,87 @@ Clean separation between domain, application, infrastructure, and scheduler laye
 - Swap any component without changing other code
 - Easy to test (mock ports)
 - New providers implement existing interfaces
+
+---
+
+## 10. Document Management
+
+Track and manage ingested documents with full CRUD via SQLite-backed metadata.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/documents` | List all ingested documents |
+| `GET` | `/documents/{id}` | Get single document metadata |
+| `DELETE` | `/documents/{id}` | Delete document + all its chunks from ChromaDB |
+
+- Metadata stored in `data/document_metadata.db`
+- Deletion matches chunks by `original_filename` metadata field
+- Each document stores: id, filename, original_filename, source_path, file_type, chunk_count, ingested_at
+
+---
+
+## 11. File Upload
+
+Upload documents directly via HTTP multipart, with automatic temp file lifecycle.
+
+```bash
+curl -X POST http://localhost:8080/upload \
+  -F "file=@recipes_1.json"
+```
+
+- Auto-detects file type by extension (.json, .md, .txt, .pdf)
+- Saves to temp → ingests → deletes temp file
+- Returns chunk count and status message
+
+---
+
+## 12. Admin & Monitoring
+
+Debug, monitor, and control the system via admin endpoints.
+
+### Chunk Management
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/admin/chunks` | List all chunks with full metadata |
+| `DELETE` | `/admin/chunks/{id}` | Delete a single chunk by ID |
+
+### Cache Control
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/admin/cache/clear` | Clear all cache layers (embedding, LLM, RAG) |
+
+### Scheduler Control
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/admin/scheduler/run` | Manually trigger scheduler job |
+| `GET` | `/admin/scheduler/status` | Get last scheduler fetch log |
+
+### System Stats & Metrics
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/admin/stats` | Vector count, document count, cache sizes |
+| `GET` | `/metrics` | Prometheus-style metrics |
+
+### Cleanup Utility
+```bash
+python -m scripts.cleanup_orphans --dry-run   # Preview orphans
+python -m scripts.cleanup_orphans              # Delete orphans
+```
+Finds and removes chunks whose `original_filename` has no matching document in SQLite.
+
+---
+
+## 13. Conversation History
+
+Persist and retrieve chat conversations with SQLite-backed storage.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/conversations` | List all conversations |
+| `GET` | `/conversations/{id}` | Get single conversation with messages |
+| `POST` | `/conversations` | Create new conversation |
+| `PUT` | `/conversations/{id}` | Update title or messages |
+| `DELETE` | `/conversations/{id}` | Delete conversation |
+
+- Stored in `data/conversations.db`
+- Each conversation tracks: id, title, messages (role + content + timestamp), created_at, updated_at

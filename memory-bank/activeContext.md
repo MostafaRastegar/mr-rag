@@ -49,6 +49,13 @@
 ### Chunk IDs
 - [x] UUID-based chunk IDs (`chunk_{uuid4_hex[:12]}_{index}`) — eliminates collision risk on re-ingestion
 
+### Document Deletion Bug Fix (Chunk Metadata Coordination)
+- [x] **Bug**: `DELETE /documents/{id}` used `delete_by_metadata("source", doc.source_path)` but loaders store `"source": path.name` (just filename, e.g. `tmpXXX.pdf`)
+- [x] **Fix**: Changed to `delete_by_metadata("original_filename", doc.original_filename)` — ingestion pipeline already injects `original_filename` into every chunk's metadata
+- [x] **`get_all_chunks()`** added to `VectorStorePort` interface and `ChromaVectorStore` implementation
+- [x] **Admin Chunk APIs**: `GET /admin/chunks` (list all chunks with metadata), `DELETE /admin/chunks/{chunk_id}` (delete single chunk)
+- [x] **Cleanup Script**: `scripts/cleanup_orphans.py` — finds and deletes chunks whose `original_filename` doesn't match any SQLite document; supports `--dry-run`
+
 ## Architecture Overview
 
 ```
@@ -92,6 +99,9 @@
 | 2026-06-16 | UUID-based chunk IDs to avoid collisions |
 | 2026-06-16 | retrieval_min_score lowered from 0.25 → 0.15 |
 | 2026-06-16 | LLM model changed to poolside/laguna-m.1:free |
+| 2026-06-23 | Chunk metadata bug fix: delete_by_metadata now uses original_filename, not source_path |
+| 2026-06-23 | Admin chunk APIs: GET /admin/chunks, DELETE /admin/chunks/{chunk_id} |
+| 2026-06-23 | Cleanup script: scripts/cleanup_orphans.py (finds and deletes orphaned chunks) |
 
 ## New Features: Synonym-Aware Retrieval
 
@@ -129,3 +139,4 @@
 ## Next Steps
 - [ ] Dockerfile sync (requirements.txt vs pyproject.toml)
 - [ ] Integration tests
+- [ ] Run cleanup script on existing data to remove orphaned chunks
