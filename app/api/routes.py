@@ -18,6 +18,9 @@ from app.api.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
+    ChunkDeleteResponse,
+    ChunkItem,
+    ChunkListResponse,
     ConversationCreateRequest,
     ConversationDeleteResponse,
     ConversationItem,
@@ -336,9 +339,10 @@ def create_router(
             if doc is None:
                 raise HTTPException(status_code=404, detail="Document not found")
 
-            # Delete chunks from vector store by source_path metadata
+            # Delete chunks from vector store by original_filename metadata
+            # (Loaders store "source"=path.name, not the full temp path)
             chunks_removed = vector_store.delete_by_metadata(
-                "source", doc.source_path
+                "original_filename", doc.original_filename
             )
 
             # Delete document metadata
@@ -450,6 +454,41 @@ def create_router(
             cache_llm_size=cache_llm_size,
             cache_rag_size=cache_rag_size,
         )
+
+    @router.get("/admin/chunks", response_model=ChunkListResponse)
+    def admin_list_chunks():
+        """
+        List all chunks in the vector store with their metadata.
+        Useful for debugging and manual inspection.
+        """
+        try:
+            chunks = vector_store.get_all_chunks()
+            return ChunkListResponse(
+                total=len(chunks),
+                chunks=[
+                    ChunkItem(id=c.id, text=c.text[:200], metadata=c.metadata)
+                    for c in chunks
+                ],
+            )
+        except VectorStoreError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Failed to list chunks")
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.delete("/admin/chunks/{chunk_id}", response_model=ChunkDeleteResponse)
+    def admin_delete_chunk(chunk_id: str):
+        """
+        Delete a single chunk from the vector store by its ID.
+        """
+        try:
+            vector_store.delete([chunk_id])
+            return ChunkDeleteResponse(status="success", deleted=True)
+        except VectorStoreError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Failed to delete chunk")
+            raise HTTPException(status_code=500, detail=str(e))
 
     # ------------------------------------------------------------------
     # Conversation Endpoints

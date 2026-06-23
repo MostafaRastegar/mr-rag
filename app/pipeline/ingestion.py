@@ -92,6 +92,15 @@ class IngestionPipeline:
                 f"for {len(chunks)} chunks"
             )
 
+        # Inject original_filename and source_path into every chunk's metadata
+        # so delete-by-metadata can match on the original name, not the temp name.
+        orig_name = original_filename or Path(file_path).name
+        for chunk in chunks:
+            if "original_filename" not in chunk.metadata:
+                chunk.metadata["original_filename"] = orig_name
+            if "source_path" not in chunk.metadata:
+                chunk.metadata["source_path"] = str(Path(file_path).resolve())
+
         # Step 4: Store in vector store
         try:
             stored = self._vector_store.add(chunks, embeddings)

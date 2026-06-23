@@ -85,6 +85,15 @@ class VectorStorePort(ABC):
         """
         return []
 
+    def get_all_chunks(self) -> list[Chunk]:
+        """
+        Return all chunks in the store with their metadata.
+
+        Default implementation returns an empty list.
+        Override in adapters that support listing all chunks.
+        """
+        return []
+
 
 class DocumentRepositoryPort(ABC):
     """Port for persisting and retrieving document metadata."""

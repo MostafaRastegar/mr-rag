@@ -210,3 +210,33 @@ class ChromaVectorStore(VectorStorePort):
         except Exception as e:
             logger.error("Failed to get all IDs: %s", str(e))
             raise VectorStoreError(f"Get all IDs failed: {e}") from e
+
+    def get_all_chunks(self) -> list[Chunk]:
+        """
+        Return all chunks in the store with their metadata.
+
+        Returns:
+            A list of Chunk objects.
+        """
+        try:
+            collection = self._collection
+            if collection is None:
+                return []
+            results = collection.get(ids=None)
+            chunks: list[Chunk] = []
+            ids = results.get("ids", [])
+            documents = results.get("documents", [])
+            metadatas = results.get("metadatas", [])
+            for i in range(len(ids)):
+                metadata = dict(metadatas[i]) if metadatas and i < len(metadatas) else {}
+                chunks.append(
+                    Chunk(
+                        id=ids[i],
+                        text=documents[i] if documents and i < len(documents) else "",
+                        metadata=metadata,
+                    )
+                )
+            return chunks
+        except Exception as e:
+            logger.error("Failed to get all chunks: %s", str(e))
+            raise VectorStoreError(f"Get all chunks failed: {e}") from e

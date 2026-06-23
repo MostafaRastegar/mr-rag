@@ -158,6 +158,28 @@ class AdminStatsResponse(BaseModel):
     cache_rag_size: int
 
 
+class ChunkItem(BaseModel):
+    """A single chunk in the vector store."""
+
+    id: str
+    text: str
+    metadata: dict
+
+
+class ChunkListResponse(BaseModel):
+    """Response body for GET /admin/chunks."""
+
+    total: int
+    chunks: list[ChunkItem]
+
+
+class ChunkDeleteResponse(BaseModel):
+    """Response body for DELETE /admin/chunks/{chunk_id}."""
+
+    status: str
+    deleted: bool
+
+
 # ---------------------------------------------------------------------------
 # Conversations
 # ---------------------------------------------------------------------------
