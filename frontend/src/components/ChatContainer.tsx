@@ -21,7 +21,7 @@ import SearchPanel from "./SearchPanel";
 import DocumentsPanel from "./DocumentsPanel";
 import AdminPanel from "./AdminPanel";
 import { sendChat, chatStream, getHealth } from "@/lib/api";
-import type { HealthResponse } from "@/lib/api";
+import type { ChatMessage, HealthResponse } from "@/lib/api";
 import { getConversation, saveConversation } from "@/lib/db";
 
 /* ------------------------------------------------------------------ */
@@ -239,11 +239,18 @@ export default function ChatContainer() {
       });
       setSidebarRefreshTrigger((n) => n + 1);
 
+      // Build history from previous messages (excluding the current question and welcome message)
+      const history: ChatMessage[] = messagesRef.current
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .filter((m) => m.id !== messagesRef.current[0]?.id) // exclude welcome
+        .slice(-10) // keep last 10 turns
+        .map((m) => ({ role: m.role, content: m.text }));
+
       let fullText = "";
       let finalSources = undefined as Message["sources"];
 
       try {
-        const stream = chatStream(question, controller.signal);
+        const stream = chatStream(question, controller.signal, history);
 
         for await (const token of stream) {
           fullText += token;
@@ -255,7 +262,7 @@ export default function ChatContainer() {
         }
 
         // stream finished – fetch full response to get sources
-        const chatResp = await sendChat(question);
+        const chatResp = await sendChat(question, history);
         const finalMsg: Message = {
           id: assistantId,
           role: "assistant",
@@ -280,7 +287,7 @@ export default function ChatContainer() {
 
         if (fullText) {
           try {
-            const chatResp = await sendChat(question);
+            const chatResp = await sendChat(question, history);
             finalSources = chatResp.sources;
           } catch {
             // ignore

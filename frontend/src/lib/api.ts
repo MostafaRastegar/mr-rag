@@ -17,6 +17,11 @@ export interface SourceItem {
   score: number;
 }
 
+export interface ChatMessage {
+  role: string;
+  content: string;
+}
+
 export interface ChatResponse {
   answer: string;
   sources: SourceItem[];
@@ -306,11 +311,14 @@ export interface SearchResponse {
 /*  Chat (full response)                                               */
 /* ------------------------------------------------------------------ */
 
-export async function sendChat(question: string): Promise<ChatResponse> {
+export async function sendChat(
+  question: string,
+  messages: ChatMessage[] = [],
+): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, messages }),
   });
   if (!res.ok) {
     const err = await res.text();
@@ -336,11 +344,12 @@ export async function sendChat(question: string): Promise<ChatResponse> {
 export async function* chatStream(
   question: string,
   signal?: AbortSignal,
+  messages: ChatMessage[] = [],
 ): AsyncGenerator<string> {
   const res = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, messages }),
     signal,
   });
 

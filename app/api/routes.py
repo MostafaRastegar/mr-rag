@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from app.api.schemas import (
     AdminStatsResponse,
     CacheClearResponse,
+    ChatMessage,
     ChatRequest,
     ChatResponse,
     ConversationCreateRequest,
@@ -131,8 +132,11 @@ def create_router(
         if not request.question.strip():
             raise HTTPException(status_code=400, detail="Question cannot be empty")
 
+        # Convert ChatMessage objects to dicts for the pipeline
+        history = [{"role": m.role, "content": m.content} for m in request.messages]
+
         try:
-            answer = rag.answer(request.question)
+            answer = rag.answer(request.question, history)
             return ChatResponse(
                 answer=answer.text,
                 sources=[
@@ -163,8 +167,11 @@ def create_router(
         if not request.question.strip():
             raise HTTPException(status_code=400, detail="Question cannot be empty")
 
+        # Convert ChatMessage objects to dicts for the pipeline
+        history = [{"role": m.role, "content": m.content} for m in request.messages]
+
         return StreamingResponse(
-            rag.answer_stream(request.question),
+            rag.answer_stream(request.question, history),
             media_type="text/plain",
         )
 

@@ -15,7 +15,7 @@ Three-stage cascading retrieval (controlled by settings flags):
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, List, cast
+from typing import AsyncGenerator, Dict, List, cast
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -58,8 +58,9 @@ STRICT_PROMPT = ChatPromptTemplate.from_messages(
         ("system", SYSTEM_PROMPT_STRICT),
         (
             "human",
-            "Context:\n{context}\n\nQuestion: {question}\n\n"
-            "Answer based only on the context above:",
+            "Context:\n{context}\n\nConversation history:\n{history}\n\n"
+            "Question: {question}\n\n"
+            "Answer based only on the context above, using conversation history for reference:",
         ),
     ]
 )
@@ -69,7 +70,8 @@ LOOSE_PROMPT = ChatPromptTemplate.from_messages(
         ("system", SYSTEM_PROMPT_LOOSE),
         (
             "human",
-            "Context:\n{context}\n\nQuestion: {question}\n\n"
+            "Context:\n{context}\n\nConversation history:\n{history}\n\n"
+            "Question: {question}\n\n"
             "Use the context as your primary source, but you may supplement "
             "with your own knowledge if it is insufficient. Clearly indicate "
             "which parts come from the context and which from your knowledge.",
@@ -80,7 +82,7 @@ LOOSE_PROMPT = ChatPromptTemplate.from_messages(
 GENERAL_PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system", SYSTEM_PROMPT_GENERAL),
-        ("human", "Question: {question}"),
+        ("human", "Conversation history:\n{history}\n\nQuestion: {question}"),
     ]
 )
 
@@ -89,7 +91,7 @@ NO_CONTEXT_PROMPT = ChatPromptTemplate.from_messages(
         ("system", SYSTEM_PROMPT_STRICT),
         (
             "human",
-            "Question: {question}\n\n"
+            "Conversation history:\n{history}\n\nQuestion: {question}\n\n"
             "No specific context was retrieved for this question.",
         ),
     ]
@@ -177,7 +179,7 @@ class RAGPipeline:
     # Public API: blocking answer
     # ------------------------------------------------------------------
 
-    def answer(self, question: str) -> Answer:
+    def answer(self, question: str, history: List[Dict[str, str]] | None = None) -> Answer:
         """
         Answer a question using RAG with cascading retrieval strategy.
 
@@ -195,6 +197,7 @@ class RAGPipeline:
 
         Args:
             question: The user's question.
+            history: Optional list of {role, content} dicts from previous turns.
 
         Returns:
             An Answer object containing the generated text and sources.
@@ -204,7 +207,7 @@ class RAGPipeline:
         """
         logger.info("Processing question: %s", question[:100])
 
-        ctx = self._prepare_rag(question)
+        ctx = self._prepare_rag(question, history)
         if ctx.is_fallback_answer:
             return Answer(text=ctx.fallback_answer_text, sources=[])
 
@@ -226,7 +229,7 @@ class RAGPipeline:
     # Public API: streaming answer
     # ------------------------------------------------------------------
 
-    async def answer_stream(self, question: str) -> AsyncGenerator[str, None]:
+    async def answer_stream(self, question: str, history: List[Dict[str, str]] | None = None) -> AsyncGenerator[str, None]:
         """
         Answer a question using RAG with streaming response.
 
@@ -235,13 +238,14 @@ class RAGPipeline:
 
         Args:
             question: The user's question.
+            history: Optional list of {role, content} dicts from previous turns.
 
         Yields:
             Tokens of the generated answer as they become available.
         """
         logger.info("Processing streaming question: %s", question[:100])
 
-        ctx = self._prepare_rag(question)
+        ctx = self._prepare_rag(question, history)
         if ctx.is_fallback_answer:
             yield ctx.fallback_answer_text
             return
@@ -265,7 +269,7 @@ class RAGPipeline:
     # Shared RAG preparation (common to both answer and answer_stream)
     # ------------------------------------------------------------------
 
-    def _prepare_rag(self, question: str) -> _RAGContext:
+    def _prepare_rag(self, question: str, history: List[Dict[str, str]] | None = None) -> _RAGContext:
         """
         Execute the shared portion of the RAG pipeline:
           cache checks → embedding → retrieval → cascade → prompt building.
@@ -276,6 +280,7 @@ class RAGPipeline:
 
         Args:
             question: The user's question.
+            history: Optional list of {role, content} dicts from previous turns.
 
         Returns:
             A _RAGContext containing the built messages, retrieval results,
@@ -382,20 +387,27 @@ class RAGPipeline:
         # Build context from retrieved chunks (may be empty for Stage 3)
         context = self._build_context(results) if results else ""
 
+        # Build history string for the prompt templates
+        history_str = self._format_history(history or [])
+
         # Select the appropriate prompt template and build messages
         try:
             if context and not use_loose_prompt:
                 formatted = STRICT_PROMPT.format_messages(
-                    context=context, question=question
+                    context=context, history=history_str, question=question
                 )
             elif context and use_loose_prompt:
                 formatted = LOOSE_PROMPT.format_messages(
-                    context=context, question=question
+                    context=context, history=history_str, question=question
                 )
             elif not context and use_loose_prompt:
-                formatted = GENERAL_PROMPT.format_messages(question=question)
+                formatted = GENERAL_PROMPT.format_messages(
+                    history=history_str, question=question
+                )
             else:
-                formatted = NO_CONTEXT_PROMPT.format_messages(question=question)
+                formatted = NO_CONTEXT_PROMPT.format_messages(
+                    history=history_str, question=question
+                )
 
             ctx.messages = _map_messages(formatted)
         except Exception as e:
@@ -603,3 +615,14 @@ class RAGPipeline:
         for i, result in enumerate(results, 1):
             context_parts.append(f"[Document {i}] {result.chunk.text}")
         return "\n\n".join(context_parts)
+
+    @staticmethod
+    def _format_history(history: List[Dict[str, str]]) -> str:
+        """Format conversation history into a string for inclusion in prompts."""
+        if not history:
+            return ""
+        parts = []
+        for msg in history:
+            role_label = "User" if msg.get("role") == "user" else "Assistant"
+            parts.append(f"{role_label}: {msg.get('content', '')}")
+        return "\n".join(parts)

@@ -20,10 +20,18 @@ class IngestResponse(BaseModel):
     chunks_ingested: int
 
 
+class ChatMessage(BaseModel):
+    """A single message in the chat history."""
+
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     """Request body for the /chat endpoint."""
 
     question: str
+    messages: list[ChatMessage] = []
 
 
 class SourceItem(BaseModel):
