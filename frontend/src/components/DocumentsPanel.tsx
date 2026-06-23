@@ -80,6 +80,7 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
       json: "JSON",
       md: "MD",
       txt: "TXT",
+      pdf: "PDF",
     };
     return map[t] ?? t.toUpperCase();
   };
@@ -170,7 +171,7 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
                           className="shrink-0 text-blue-500"
                         />
                         <span className="flex-1 truncate font-medium text-zinc-800 dark:text-zinc-200">
-                          {doc.filename}
+                          {doc.original_filename}
                         </span>
                         <span
                           className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${

@@ -51,6 +51,7 @@ export interface UploadResponse {
 export interface DocumentItem {
   id: string;
   filename: string;
+  original_filename: string;
   source_path: string;
   file_type: string;
   chunk_count: number;

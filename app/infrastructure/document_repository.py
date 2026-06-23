@@ -39,6 +39,7 @@ class SQLiteDocumentRepository(DocumentRepositoryPort):
                 CREATE TABLE IF NOT EXISTS documents (
                     id TEXT PRIMARY KEY,
                     filename TEXT NOT NULL,
+                    original_filename TEXT NOT NULL DEFAULT '',
                     source_path TEXT NOT NULL,
                     file_type TEXT NOT NULL,
                     chunk_count INTEGER NOT NULL DEFAULT 0,
@@ -61,12 +62,13 @@ class SQLiteDocumentRepository(DocumentRepositoryPort):
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO documents
-                        (id, filename, source_path, file_type, chunk_count, ingested_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (id, filename, original_filename, source_path, file_type, chunk_count, ingested_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         doc.id,
                         doc.filename,
+                        doc.original_filename,
                         doc.source_path,
                         doc.file_type,
                         doc.chunk_count,
@@ -124,9 +126,15 @@ class SQLiteDocumentRepository(DocumentRepositoryPort):
 
     @staticmethod
     def _row_to_doc(row: sqlite3.Row) -> DocumentInfo:
+        # Fallback to filename if original_filename column is missing (old DBs)
+        try:
+            original = row["original_filename"]
+        except (IndexError, KeyError):
+            original = row["filename"]
         return DocumentInfo(
             id=row["id"],
             filename=row["filename"],
+            original_filename=original or row["filename"],
             source_path=row["source_path"],
             file_type=row["file_type"],
             chunk_count=row["chunk_count"],

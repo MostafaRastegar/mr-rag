@@ -47,12 +47,13 @@ class IngestionPipeline:
         self._vector_store = vector_store
         self._doc_repo = doc_repo
 
-    def run(self, file_path: str) -> int:
+    def run(self, file_path: str, original_filename: str | None = None) -> int:
         """
         Ingest a file: load documents, split into chunks, embed, and store.
 
         Args:
             file_path: Path to the source file to ingest.
+            original_filename: Original file name (before rename to temp).
 
         Returns:
             Number of chunks ingested.
@@ -107,6 +108,7 @@ class IngestionPipeline:
                 doc_info = DocumentInfo(
                     id=str(uuid.uuid4()),
                     filename=path.name,
+                    original_filename=original_filename or path.name,
                     source_path=str(path.resolve()),
                     file_type=path.suffix.lower().lstrip("."),
                     chunk_count=stored,

@@ -239,7 +239,7 @@ def create_router(
             tmp.write(content)
             tmp.close()
 
-            chunks = ingestion.run(tmp.name)
+            chunks = ingestion.run(tmp.name, original_filename=file.filename or "unknown")
             return UploadResponse(
                 status="success",
                 file_name=file.filename or "unknown",
@@ -278,6 +278,7 @@ def create_router(
                     DocumentItem(
                         id=d.id,
                         filename=d.filename,
+                        original_filename=getattr(d, "original_filename", d.filename),
                         source_path=d.source_path,
                         file_type=d.file_type,
                         chunk_count=d.chunk_count,
@@ -307,6 +308,7 @@ def create_router(
             return DocumentItem(
                 id=doc.id,
                 filename=doc.filename,
+                original_filename=getattr(doc, "original_filename", doc.filename),
                 source_path=doc.source_path,
                 file_type=doc.file_type,
                 chunk_count=doc.chunk_count,

@@ -98,6 +98,7 @@ class DocumentItem(BaseModel):
 
     id: str
     filename: str
+    original_filename: str
     source_path: str
     file_type: str
     chunk_count: int

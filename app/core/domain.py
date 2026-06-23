@@ -60,6 +60,7 @@ class DocumentInfo:
 
     id: str
     filename: str
+    original_filename: str  # original file name before temp rename
     source_path: str
     file_type: str  # "json", "md", "txt"
     chunk_count: int
