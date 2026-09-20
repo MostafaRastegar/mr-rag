@@ -9,7 +9,8 @@ Supports optional caching via CachePort for repeated requests.
 import hashlib
 import json
 import logging
-from typing import AsyncGenerator, List, Optional
+import time
+from typing import Any, AsyncGenerator, List, Optional
 
 import httpx
 
@@ -19,6 +20,12 @@ from app.core.exceptions import LLMError
 from app.core.ports import CachePort, LLMPort
 
 logger = logging.getLogger(__name__)
+
+# HTTP status codes that indicate a transient provider failure worth retrying
+# (the Nvidia free tier intermittently returns 503 provider_overloaded).
+_TRANSIENT_STATUS_CODES = {408, 429, 502, 503, 504}
+# Base delay (seconds) for exponential backoff between transient retries.
+_TRANSIENT_RETRY_BASE_DELAY = 2.0
 
 
 class OpenRouterLLM(LLMPort):
@@ -49,6 +56,23 @@ class OpenRouterLLM(LLMPort):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self._cache = cache
+
+    def _effective_reasoning(self) -> dict:
+        """
+        Build the OpenRouter `reasoning` payload parameter.
+
+        Free-tier reasoning models (e.g. nvidia/nemotron-3-ultra) default to
+        "reasoning enabled". Those reasoning tokens count against `max_tokens`,
+        which left little budget for the visible answer and produced short,
+        truncated replies — one of the reported quality problems.
+
+        Disable reasoning for RAG generation calls (verbatim extraction and
+        formatting work does not benefit from extended thinking) but allow
+        callers to opt back in via settings.
+        """
+        if settings.llm_reasoning_enabled:
+            return {}
+        return {"reasoning": {"enabled": False, "exclude": True}}
 
     def _serialize_messages(self, messages: List[Message]) -> str:
         """Serialize messages to a JSON string for cache key generation."""
@@ -103,26 +127,80 @@ class OpenRouterLLM(LLMPort):
                 return cached
 
         # No cache hit, call the API
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        payload.update(self._effective_reasoning())
 
         try:
-            response = httpx.post(
-                url=f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=120,
-            )
+            # Transient OpenRouter failures (Nvidia free tier frequently returns
+            # 503 provider_overloaded). Retry with short backoff instead of
+            # surfacing a 500 to the user.
+            response: httpx.Response | None = None
+            last_error: Exception | None = None
+            for attempt in range(settings.llm_retry_attempts):
+                try:
+                    response = httpx.post(
+                        url=f"{self.base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=settings.llm_timeout_seconds,
+                    )
+                    if response.status_code in _TRANSIENT_STATUS_CODES:
+                        wait = _TRANSIENT_RETRY_BASE_DELAY * (2**attempt)
+                        logger.warning(
+                            "OpenRouter transient error %s (attempt %d/%d) — retrying in %.1fs",
+                            response.status_code,
+                            attempt + 1,
+                            settings.llm_retry_attempts,
+                            wait,
+                        )
+                        time.sleep(wait)
+                        continue
+                    break
+                except httpx.RequestError as e:
+                    last_error = e
+                    wait = _TRANSIENT_RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning(
+                        "OpenRouter request error (attempt %d/%d): %s — retrying in %.1fs",
+                        attempt + 1,
+                        settings.llm_retry_attempts,
+                        str(e),
+                        wait,
+                    )
+                    time.sleep(wait)
+            if response is None:
+                raise LLMError(
+                    f"LLM request failed after {settings.llm_retry_attempts} attempts: {last_error}"
+                ) from last_error
             response.raise_for_status()
             data = response.json()
+            # OpenRouter reports in-band provider failures inside HTTP 200
+            # responses (no "choices" at all), e.g.
+            # {"error": {"code": 503, "message": ...}} — check before extracting.
+            if data.get("error"):
+                raise LLMError(
+                    f"LLM upstream provider error: {data['error'].get('message', data['error'])}"
+                )
             result = data["choices"][0]["message"]["content"]
+            # Reasoning models can return a reasoning-only message (empty
+            # visible content) when the token budget is exhausted by thinking.
+            if result is None or result == "":
+                reasoning_excerpt = (data["choices"][0]["message"].get("reasoning") or "")[:200]
+                logger.warning(
+                    "LLM returned empty content (reasoning exhausted budget?): %s",
+                    reasoning_excerpt,
+                )
+                raise LLMError(
+                    "LLM returned an empty answer — the model spent the whole "
+                    "token budget on reasoning. Try reducing context or disabling reasoning."
+                )
         except httpx.HTTPStatusError as e:
             logger.error(
                 "OpenRouter LLM API error: %s - %s",
@@ -182,17 +260,18 @@ class OpenRouterLLM(LLMPort):
                 return
 
         # No cache hit, stream from API
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
         }
+        payload.update(self._effective_reasoning())
 
         full_response_parts: List[str] = []
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
                 async with client.stream(
                     "POST",
                     f"{self.base_url}/chat/completions",

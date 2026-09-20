@@ -22,6 +22,8 @@ from app.infrastructure.chroma_vector_store import ChromaVectorStore
 from app.infrastructure.conversation_repository import SQLiteConversationRepository
 from app.infrastructure.document_loader import AutoDocumentLoader
 from app.infrastructure.document_repository import SQLiteDocumentRepository
+from app.infrastructure.hybrid_retriever import HybridRetriever
+from app.infrastructure.llm_reranker import LLMReranker
 from app.infrastructure.openrouter_embedding import OpenRouterEmbedding
 from app.infrastructure.openrouter_llm import OpenRouterLLM
 from app.infrastructure.text_splitter import LangChainTextSplitter
@@ -80,11 +82,33 @@ ingestion_pipeline = IngestionPipeline(
     vector_store=vector_store,
     doc_repo=doc_repo,
 )
+
+# Retrieval quality: hybrid keyword+dense search and LLM-based reranking.
+# Both are wired behind ports so the pipeline stays infrastructure-agnostic.
+hybrid_retriever = HybridRetriever(
+    vector_store=vector_store,
+    bm25_weight=settings.hybrid_bm25_weight,
+)
+reranker = LLMReranker(llm=llm)
+
 rag_pipeline = RAGPipeline(
     embedding=embedding,
     llm=llm,
     vector_store=vector_store,
     cache=_cache_rag,
+    reranker=reranker,
+    retriever=hybrid_retriever,
+)
+logging.getLogger(__name__).info(
+    "RAG pipeline ready (hybrid=%s bm25_weight=%.2f, rerank=%s top_n=%d, "
+    "fetch_k=%d, top_k=%d, min_score=%.2f)",
+    settings.hybrid_search_enabled,
+    settings.hybrid_bm25_weight,
+    settings.rerank_enabled,
+    settings.rerank_top_n,
+    settings.fetch_k,
+    settings.top_k,
+    settings.retrieval_min_score,
 )
 
 # ---------------------------------------------------------------------------

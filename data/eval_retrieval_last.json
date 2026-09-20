@@ -1,0 +1,27 @@
+{
+  "embedding_model": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+  "top_k": 5,
+  "fetch_k": 20,
+  "reports": [
+    {
+      "label": "DENSE ONLY",
+      "queries": 13,
+      "hit@5": 1.0,
+      "mrr": 0.8102564102564103,
+      "score_min": 0.1863,
+      "score_avg": 0.44575846153846155,
+      "score_max": 0.6876,
+      "failures": []
+    },
+    {
+      "label": "HYBRID (BM25 + DENSE)",
+      "queries": 13,
+      "hit@5": 1.0,
+      "mrr": 0.9487179487179488,
+      "score_min": 0.8819,
+      "score_avg": 0.9603338461538462,
+      "score_max": 1.0,
+      "failures": []
+    }
+  ]
+}

@@ -23,7 +23,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.config import settings
 from app.core.domain import Answer, Message, SearchResult
 from app.core.exceptions import RetrievalError
-from app.core.ports import CachePort, EmbeddingPort, LLMPort, VectorStorePort
+from app.core.ports import (
+    CachePort,
+    EmbeddingPort,
+    LLMPort,
+    RerankPort,
+    VectorStorePort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +38,43 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT_STRICT = (
-    "You are a helpful assistant that answers questions based on the provided context. "
-    "Use only the information from the context to answer. "
-    "If the context doesn't contain enough information, say so clearly."
+    "You are a precise technical assistant that answers STRICTLY from the "
+    "provided context.\n\n"
+    "Rules you must follow:\n"
+    "1. Answer only from the context. Never invent facts, numbers, or names.\n"
+    "2. Quote exact values verbatim — voltages, resistances, part numbers, "
+    "model numbers, temperatures, quantities, and units must be reproduced "
+    "exactly as written in the context.\n"
+    "3. Be specific and complete, never vague. Prefer concrete details "
+    "(numbers, component names, steps, conditions) over general statements. "
+    "Do not pad the answer with filler or generic commentary.\n"
+    "4. When the question asks how to do something or how to diagnose "
+    "something, give the steps in order.\n"
+    "5. Cite the source of each claim using the bracketed number of the "
+    "context passage, e.g. [1] or [2].\n"
+    "6. If the context only partially answers the question, answer the part "
+    "it does cover and explicitly state what is missing. Do not fill gaps "
+    "with assumptions.\n"
+    "7. If the context contains nothing relevant, say exactly: "
+    "\"The provided documents do not contain enough information to answer "
+    "this question.\""
 )
 
 SYSTEM_PROMPT_LOOSE = (
-    "You are a helpful assistant. Answer the user's question using the provided context "
-    "as your primary source. If the context does not contain enough information to fully "
-    "answer the question, you may supplement with your own knowledge — but clearly indicate "
-    "which parts come from the provided context and which come from your general knowledge."
+    "You are a helpful assistant. Answer the user's question using the provided "
+    "context as your primary source. If the context does not contain enough "
+    "information to fully answer the question, you may supplement with your own "
+    "knowledge — but clearly indicate which parts come from the provided "
+    "context and which come from your general knowledge. Cite context passages "
+    "using their bracketed number, e.g. [1]."
 )
 
-SYSTEM_PROMPT_GENERAL = "You are a helpful assistant. Answer the user's question based on your general knowledge."
+SYSTEM_PROMPT_GENERAL = (
+    "You are a helpful assistant. Answer the user's question based on your "
+    "general knowledge. Be specific and concrete; avoid vague generalities. "
+    "State clearly that no project documents were available to ground the "
+    "answer."
+)
 
 QUERY_EXPANSION_PROMPT_TEMPLATE = (
     "Rewrite the following question in {count} different ways. "
@@ -58,9 +88,13 @@ STRICT_PROMPT = ChatPromptTemplate.from_messages(
         ("system", SYSTEM_PROMPT_STRICT),
         (
             "human",
-            "Context:\n{context}\n\nConversation history:\n{history}\n\n"
+            "Context passages:\n{context}\n\n"
+            "Conversation history:\n{history}\n\n"
+            "---\n"
             "Question: {question}\n\n"
-            "Answer based only on the context above, using conversation history for reference:",
+            "Answer using ONLY the context passages above. Quote exact values "
+            "verbatim, be specific rather than general, and cite passages as "
+            "[1], [2], etc. Answer:",
         ),
     ]
 )
@@ -70,11 +104,13 @@ LOOSE_PROMPT = ChatPromptTemplate.from_messages(
         ("system", SYSTEM_PROMPT_LOOSE),
         (
             "human",
-            "Context:\n{context}\n\nConversation history:\n{history}\n\n"
+            "Context passages:\n{context}\n\n"
+            "Conversation history:\n{history}\n\n"
+            "---\n"
             "Question: {question}\n\n"
-            "Use the context as your primary source, but you may supplement "
-            "with your own knowledge if it is insufficient. Clearly indicate "
-            "which parts come from the context and which from your knowledge.",
+            "Prefer the context passages. Be specific inside the context's "
+            "scope, cite them as [1], [2], etc., and clearly mark anything "
+            "that comes from your own general knowledge. Answer:",
         ),
     ]
 )
@@ -82,7 +118,28 @@ LOOSE_PROMPT = ChatPromptTemplate.from_messages(
 GENERAL_PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system", SYSTEM_PROMPT_GENERAL),
-        ("human", "Conversation history:\n{history}\n\nQuestion: {question}"),
+        (
+            "human",
+            "Conversation history:\n{history}\n\n"
+            "---\n"
+            "Question: {question}\n\n"
+            "No project context was retrieved. Be specific and state that the "
+            "answer is not grounded in project documents. Answer:",
+        ),
+    ]
+)
+
+NO_CONTEXT_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT_STRICT),
+        (
+            "human",
+            "Conversation history:\n{history}\n\n"
+            "---\n"
+            "Question: {question}\n\n"
+            "No relevant context passages were retrieved. State clearly that "
+            "the documents do not contain enough information to answer. Answer:",
+        ),
     ]
 )
 
@@ -169,11 +226,26 @@ class RAGPipeline:
         llm: LLMPort,
         vector_store: VectorStorePort,
         cache: CachePort | None = None,
+        reranker: RerankPort | None = None,
+        retriever: "object | None" = None,
     ) -> None:
+        """
+        Args:
+            embedding: Embedding provider.
+            llm: Chat completion provider.
+            vector_store: Dense retrieval backend.
+            cache: Optional cache for answers and embeddings.
+            reranker: Optional reranker for re-scoring candidates.
+            retriever: Optional hybrid retriever exposing
+                `search(query, query_embedding, top_k, fetch_k)`. When absent
+                the pipeline falls back to the vector store directly.
+        """
         self._embedding = embedding
         self._llm = llm
         self._vector_store = vector_store
         self._cache = cache
+        self._reranker = reranker
+        self._retriever = retriever
 
     # ------------------------------------------------------------------
     # Public API: blocking answer
@@ -339,11 +411,13 @@ class RAGPipeline:
                     )
 
         # ------------------------------------------------------------------
-        # Stage 1 — Normal retrieval
+        # Stage 1 — Normal retrieval (hybrid: dense + BM25 when enabled)
         # ------------------------------------------------------------------
         use_cascade = settings.query_expansion_enabled or settings.loose_prompt_enabled
         results = self._search(
-            query_embedding, allow_low_score_fallback=not use_cascade
+            query_embedding,
+            allow_low_score_fallback=not use_cascade,
+            question=question,
         )
         use_loose_prompt = False
 
@@ -359,9 +433,40 @@ class RAGPipeline:
             )
             results = self._search_with_expansion(question)
 
+        # Stage 2b — Multi-query retrieval (LangChain MultiQueryRetriever)
+        # Used when the question is multi-part / long and Stage 1 was weak.
+        if (
+            needs_expansion
+            and settings.multi_query_enabled
+            and results
+            and self._is_low_relevance(results)
+        ):
+            logger.info("Stage 1 weakly relevant — trying multi-query retrieval (Stage 2b)")
+            mq_results = self._search_multi_query(question)
+            if mq_results:
+                results = mq_results
+
+        # ------------------------------------------------------------------
+        # Stage 2c — LLM reranking of the candidate pool
+        # The reranker narrows a large candidate set down to the most
+        # relevant chunks, which is what stops the model from answering with
+        # generic summaries built from loosely-related context.
+        # ------------------------------------------------------------------
+        if results and settings.rerank_enabled:
+            results = self._rerank(question, results)
+
+        # ------------------------------------------------------------------
         # Stage 3 — Loose prompt
-        if settings.loose_prompt_enabled:
-            logger.info("Loose prompt enabled — relaxing system prompt (Stage 3)")
+        # IMPORTANT: only relax the system prompt when retrieval genuinely
+        # failed OR produced weakly-relevant context. Previously this fired
+        # unconditionally whenever the flag was on, which made the model lean
+        # on its own general knowledge even when good context was available —
+        # the main cause of vague, generic answers.
+        # ------------------------------------------------------------------
+        if settings.loose_prompt_enabled and self._should_use_loose_prompt(results):
+            logger.info(
+                "Weak or empty context — relaxing system prompt (Stage 3)"
+            )
             use_loose_prompt = True
 
         # Handle no results
@@ -448,38 +553,93 @@ class RAGPipeline:
         """
         Check if the retrieved results have low relevance overall.
 
-        Returns True if the average score of all results is below 0.3,
-        indicating the model couldn't find a good match and cascade is needed.
+        Returns True if the average score of all results is below
+        `settings.retrieval_low_relevance_threshold`, indicating the model
+        couldn't find a good match and the cascade stages should run.
+
+        The threshold is configurable rather than hardcoded because the right
+        value depends on the embedding model's similarity distribution.
         """
         if not results:
             return True
         avg_score = sum(r.score for r in results) / len(results)
-        logger.info("Average relevance score: %.4f (threshold: 0.30)", avg_score)
-        return avg_score < 0.30
+        threshold = settings.retrieval_low_relevance_threshold
+        logger.info(
+            "Average relevance score: %.4f (threshold: %.2f)", avg_score, threshold
+        )
+        return avg_score < threshold
+
+    def _should_use_loose_prompt(self, results: List[SearchResult]) -> bool:
+        """
+        Decide whether the system prompt should be relaxed (Stage 3).
+
+        The loose prompt allows the model to fall back on its own general
+        knowledge, which is only appropriate when retrieval produced nothing
+        usable. If good context exists we must keep the strict prompt so the
+        answer stays grounded in the documents.
+
+        Returns:
+            True only when there are no results, or the results are weak
+            enough that grounding the answer would be misleading.
+        """
+        if not results:
+            logger.info("No context available — loose prompt is appropriate")
+            return True
+
+        avg_score = sum(r.score for r in results) / len(results)
+        threshold = settings.retrieval_low_relevance_threshold
+        if avg_score < threshold:
+            logger.info(
+                "Context relevance %.4f below %.2f — loose prompt is appropriate",
+                avg_score,
+                threshold,
+            )
+            return True
+
+        logger.info(
+            "Context relevance %.4f is sufficient — keeping strict grounded prompt",
+            avg_score,
+        )
+        return False
 
     def _search(
         self,
         query_embedding: List[float],
         allow_low_score_fallback: bool = True,
+        question: str = "",
     ) -> List[SearchResult]:
         """
-        Run a single search against the vector store and filter results.
+        Run a single search and filter results.
+
+        Uses the hybrid retriever (BM25 + dense) when one is configured,
+        otherwise the dense vector store directly. A wide candidate pool is
+        fetched so the reranker has enough material to work with.
 
         Args:
             query_embedding: The embedding vector to search with.
             allow_low_score_fallback: If True and all results are below min_score,
                 keep the single best result (original behavior).
                 If False, return empty list so the cascade (Stage 2/3) can proceed.
+            question: The raw question text, required for BM25 keyword matching.
 
         Returns:
             A list of SearchResult objects that pass the min_score filter,
             or an empty list if nothing relevant was found.
         """
+        pool = max(settings.fetch_k, settings.top_k)
         try:
-            results: List[SearchResult] = self._vector_store.search(
-                query_embedding=query_embedding,
-                top_k=settings.top_k,
-            )
+            if self._retriever is not None and settings.hybrid_search_enabled and question:
+                results: List[SearchResult] = self._retriever.search(
+                    query=question,
+                    query_embedding=query_embedding,
+                    top_k=pool,
+                    fetch_k=pool,
+                )
+            else:
+                results = self._vector_store.search(
+                    query_embedding=query_embedding,
+                    top_k=pool,
+                )
         except Exception as e:
             logger.error("Vector store search failed: %s", str(e))
             raise RetrievalError(f"Failed to search vector store: {e}") from e
@@ -608,12 +768,136 @@ class RAGPipeline:
         logger.info("Merged %d unique chunks from query expansion", len(merged))
         return merged
 
+    def _rerank(
+        self, question: str, results: List[SearchResult]
+    ) -> List[SearchResult]:
+        """
+        Re-score candidates with the reranker and keep the best `rerank_top_n`.
+
+        Reranking is skipped when no reranker is configured, when results are
+        already within the target size, or when the reranker itself is
+        disabled. Failures fall back to the retrieval order so answering never
+        breaks because of reranking.
+
+        Returns:
+            The reranked subset, or the input unchanged when reranking is
+            unavailable.
+        """
+        target = settings.rerank_top_n or settings.top_k
+
+        if self._reranker is None:
+            return results[:target] if target else results
+
+        if len(results) <= 1:
+            return results[:target] if target else results
+
+        try:
+            reranked = self._reranker.rerank(question, results, top_k=target)
+        except Exception as e:
+            logger.warning(
+                "Rerank failed (%s) — keeping retrieval order", str(e)
+            )
+            return results[:target]
+
+        if not reranked:
+            logger.warning("Reranker returned nothing — keeping retrieval order")
+            return results[:target]
+
+        logger.info(
+            "Rerank: %d candidates → %d chunks (top score %.3f)",
+            len(results),
+            len(reranked),
+            reranked[0].score,
+        )
+        return reranked
+
+    def _search_multi_query(self, question: str) -> List[SearchResult]:
+        """
+        Retrieve over multiple phrasings of the question and fuse with RRF.
+
+        Complements Stage 2 query expansion: this path merges ranked lists via
+        Reciprocal Rank Fusion instead of taking the single best-scoring list,
+        which surfaces chunks that only one phrasing happens to match.
+
+        Returns:
+            A merged, deduplicated list, or an empty list when nothing was
+            found or the expansion produced no usable variants.
+        """
+        try:
+            queries = self._expand_query(question)
+        except Exception as e:
+            logger.warning("Multi-query expansion failed: %s", str(e))
+            return []
+
+        if len(queries) <= 1:
+            return []
+
+        rrf_k = 60.0
+        fused: dict[str, dict] = {}
+
+        for query in queries:
+            try:
+                embedding = self._embedding.embed_query(query)
+                results = self._search(embedding, question=query)
+            except Exception as e:
+                logger.warning(
+                    "Multi-query search failed for '%s': %s", query[:50], str(e)
+                )
+                continue
+
+            for rank, result in enumerate(results):
+                key = result.chunk.id or result.chunk.text[:200]
+                entry = fused.setdefault(key, {"result": result, "score": 0.0})
+                entry["score"] += 1.0 / (rrf_k + rank + 1)
+                if result.score > entry["result"].score:
+                    entry["result"] = result
+
+        if not fused:
+            return []
+
+        ordered = sorted(fused.values(), key=lambda e: e["score"], reverse=True)
+        top_score = ordered[0]["score"]
+        merged = [
+            SearchResult(
+                chunk=entry["result"].chunk,
+                score=round(entry["score"] / top_score, 4) if top_score else 0.0,
+            )
+            for entry in ordered
+        ]
+
+        logger.info(
+            "Multi-query retrieval: %d phrasings → %d unique chunks",
+            len(queries),
+            len(merged),
+        )
+        return merged
+
     @staticmethod
     def _build_context(results: List[SearchResult]) -> str:
-        """Build a context string from retrieved search results."""
+        """
+        Build a context string from retrieved search results.
+
+        Each chunk is labelled with a numbered citation and a human-readable
+        source so the model can reference specific documents and the caller
+        can map an assertion back to its origin. The temporary-path metadata
+        (`source` pointing at `/tmp/...`) is intentionally not used, because it
+        is meaningless to both the model and the user.
+        """
         context_parts = []
         for i, result in enumerate(results, 1):
-            context_parts.append(f"[Document {i}] {result.chunk.text}")
+            metadata = result.chunk.metadata or {}
+            origin = (
+                metadata.get("original_filename")
+                or metadata.get("source")
+                or "unknown"
+            )
+            origin = str(origin).split("/")[-1]
+            if metadata.get("page") is not None:
+                origin = f"{origin}, p.{metadata['page']}"
+            elif metadata.get("section"):
+                origin = f"{origin} — {metadata['section']}"
+
+            context_parts.append(f"[{i}] ({origin}) {result.chunk.text}")
         return "\n\n".join(context_parts)
 
     @staticmethod
