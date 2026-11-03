@@ -316,3 +316,39 @@ class TextSplitterPort(ABC):
             A list of Chunk objects.
         """
         ...
+
+
+class RerankPort(ABC):
+    """
+    Port for re-scoring retrieved candidates against the query.
+
+    Reranking separates "loosely related" chunks from chunks that actually
+    answer the question. Without it the pipeline feeds the LLM whatever dense
+    similarity returned first, which is a leading cause of generic answers.
+
+    Implementations may call a dedicated rerank API or use an LLM for
+    listwise scoring. Both must return candidates ordered best-first.
+    """
+
+    @abstractmethod
+    def rerank(
+        self,
+        query: str,
+        results: List[SearchResult],
+        top_k: int,
+    ) -> List[SearchResult]:
+        """
+        Re-score and re-order search results for a query.
+
+        Args:
+            query: The user's question.
+            results: Candidate results from the retriever(s).
+            top_k: Maximum number of results to return.
+
+        Returns:
+            A list of SearchResult objects ordered most-relevant first, with
+            `score` replaced by the reranker's relevance score (0.0-1.0).
+            On failure, implementations should return the input order
+            truncated to `top_k` rather than raising.
+        """
+        ...

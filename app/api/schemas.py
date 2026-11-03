@@ -40,6 +40,9 @@ class SourceItem(BaseModel):
     content: str
     metadata: dict
     score: float
+    # Human-readable origin (original filename, plus page/section when known).
+    source_name: str | None = None
+    chunk_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -70,6 +73,40 @@ class SearchResponse(BaseModel):
     query: str
     total: int
     results: list[SearchResultItem]
+
+
+class RetrievalDebugRequest(BaseModel):
+    """Request body for the /admin/retrieval/debug endpoint."""
+
+    query: str
+    top_k: int | None = None
+
+
+class RetrievalDebugStage(BaseModel):
+    """Results produced by one retrieval stage."""
+
+    stage: str
+    count: int
+    results: list[SearchResultItem]
+
+
+class RetrievalDebugResponse(BaseModel):
+    """
+    Full retrieval trace for a single query.
+
+    Exposes every stage of the retrieval pipeline side by side so a poor
+    answer can be traced to a specific stage: dense recall, hybrid fusion or
+    reranking. Without this, "the answer was wrong" is not attributable.
+    """
+
+    query: str
+    dense: RetrievalDebugStage
+    hybrid: RetrievalDebugStage | None = None
+    reranked: RetrievalDebugStage | None = None
+    # Decision inputs the pipeline itself uses.
+    min_score: float
+    low_relevance_threshold: float
+    rerank_min_score: float
 
 
 class UploadResponse(BaseModel):

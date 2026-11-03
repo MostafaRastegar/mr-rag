@@ -33,6 +33,9 @@ from app.api.schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    RetrievalDebugRequest,
+    RetrievalDebugResponse,
+    RetrievalDebugStage,
     SchedulerRunResponse,
     SchedulerStatusResponse,
     SearchRequest,
@@ -62,6 +65,35 @@ from app.scheduler.logger import read_last_fetch
 from app.scheduler.job import run_with_retry
 
 logger = logging.getLogger(__name__)
+
+
+def _source_label(metadata: dict | None) -> str | None:
+    """
+    Build a human-readable source label from chunk metadata.
+
+    Prefers `original_filename` because chunks ingested from temp files carry a
+    meaningless `source` such as `/tmp/tmpab12cd.txt`. Page and section are
+    appended when present so a citation can be located in the source document.
+
+    Args:
+        metadata: Chunk metadata.
+
+    Returns:
+        A label string, or None when no usable filename is present.
+    """
+    if not metadata:
+        return None
+
+    name = metadata.get("original_filename") or metadata.get("source")
+    if not name:
+        return None
+
+    label = str(name).split("/")[-1]
+    if metadata.get("page") is not None:
+        label = f"{label}, p.{metadata['page']}"
+    elif metadata.get("section"):
+        label = f"{label} — {metadata['section']}"
+    return label
 
 
 def create_router(
@@ -147,6 +179,8 @@ def create_router(
                         content=s.chunk.text[:200],
                         metadata=s.chunk.metadata,
                         score=s.score,
+                        source_name=_source_label(s.chunk.metadata),
+                        chunk_id=s.chunk.id or None,
                     )
                     for s in answer.sources
                 ],
@@ -216,6 +250,88 @@ def create_router(
                 )
                 for r in results
             ],
+        )
+
+    @router.post("/admin/retrieval/debug", response_model=RetrievalDebugResponse)
+    def retrieval_debug(request: RetrievalDebugRequest):
+        """
+        Trace every retrieval stage for one query without calling the LLM.
+
+        Runs dense search, hybrid fusion and reranking independently and
+        returns each stage's ranked output along with the thresholds the
+        pipeline uses to make decisions. This makes a bad answer attributable
+        to a specific stage instead of a black box.
+        """
+        if embedding is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Debug endpoint requires the embedding port",
+            )
+
+        if not request.query.strip():
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+        from app.config import settings as _settings
+
+        def _items(results) -> list[SearchResultItem]:
+            return [
+                SearchResultItem(
+                    content=r.chunk.text[:500],
+                    metadata=r.chunk.metadata,
+                    score=r.score,
+                )
+                for r in results
+            ]
+
+        try:
+            query_embedding = embedding.embed_query(request.query)
+            dense = vector_store.search(query_embedding, _settings.fetch_k)
+        except EmbeddingError as e:
+            logger.exception("Debug embedding failed")
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.exception("Debug retrieval failed")
+            raise HTTPException(status_code=500, detail=f"Debug failed: {e}")
+
+        hybrid_stage = None
+        reranked_stage = None
+
+        if rag._retriever is not None and _settings.hybrid_search_enabled:
+            try:
+                hybrid_results = rag._retriever.search(
+                    query=request.query,
+                    query_embedding=query_embedding,
+                    top_k=_settings.fetch_k,
+                    fetch_k=_settings.fetch_k,
+                )
+                hybrid_stage = RetrievalDebugStage(
+                    stage="hybrid", count=len(hybrid_results), results=_items(hybrid_results)
+                )
+            except Exception as e:
+                logger.warning("Debug hybrid stage failed: %s", str(e))
+
+        if rag._reranker is not None and _settings.rerank_enabled:
+            candidates = (
+                [r for r in dense] if hybrid_stage is None else hybrid_results
+            )
+            try:
+                reranked = rag._rerank(request.query, candidates)
+                reranked_stage = RetrievalDebugStage(
+                    stage="reranked", count=len(reranked), results=_items(reranked)
+                )
+            except Exception as e:
+                logger.warning("Debug rerank stage failed: %s", str(e))
+
+        return RetrievalDebugResponse(
+            query=request.query,
+            dense=RetrievalDebugStage(
+                stage="dense", count=len(dense), results=_items(dense)
+            ),
+            hybrid=hybrid_stage,
+            reranked=reranked_stage,
+            min_score=_settings.retrieval_min_score,
+            low_relevance_threshold=_settings.retrieval_low_relevance_threshold,
+            rerank_min_score=_settings.rerank_min_score,
         )
 
     @router.post("/upload", response_model=UploadResponse)
