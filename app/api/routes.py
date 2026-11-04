@@ -126,7 +126,7 @@ def create_router(
     """
     router = APIRouter()
 
-    @router.get("/health", response_model=HealthResponse)
+    @router.get("/health", response_model=HealthResponse, tags=["System"])
     def health():
         """Health check endpoint."""
         try:
@@ -139,7 +139,7 @@ def create_router(
             vector_store_count=count,
         )
 
-    @router.post("/ingest", response_model=IngestResponse)
+    @router.post("/ingest", response_model=IngestResponse, tags=["Ingestion"])
     def ingest(request: IngestRequest):
         """
         Ingest a JSON file into the vector store.
@@ -159,7 +159,7 @@ def create_router(
             logger.exception("Unexpected ingestion error")
             raise HTTPException(status_code=500, detail=f"Ingestion failed: {e}")
 
-    @router.post("/chat", response_model=ChatResponse)
+    @router.post("/chat", response_model=ChatResponse, tags=["Chat"])
     def chat(request: ChatRequest):
         """
         Ask a question and get an answer based on ingested documents.
@@ -192,7 +192,7 @@ def create_router(
             logger.exception("Unexpected chat error")
             raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
 
-    @router.post("/chat/stream")
+    @router.post("/chat/stream", tags=["Chat"])
     async def chat_stream(request: ChatRequest):
         """
         Ask a question and get a streaming answer based on ingested documents.
@@ -212,7 +212,7 @@ def create_router(
             media_type="text/plain",
         )
 
-    @router.post("/search", response_model=SearchResponse)
+    @router.post("/search", response_model=SearchResponse, tags=["Search"])
     def search(request: SearchRequest):
         """
         Direct vector search — no LLM call.
@@ -252,7 +252,11 @@ def create_router(
             ],
         )
 
-    @router.post("/admin/retrieval/debug", response_model=RetrievalDebugResponse)
+    @router.post(
+        "/admin/retrieval/debug",
+        response_model=RetrievalDebugResponse,
+        tags=["Admin"],
+    )
     def retrieval_debug(request: RetrievalDebugRequest):
         """
         Trace every retrieval stage for one query without calling the LLM.
@@ -334,10 +338,12 @@ def create_router(
             rerank_min_score=_settings.rerank_min_score,
         )
 
-    @router.post("/upload", response_model=UploadResponse)
-    async def upload_file(file: UploadFile = File(...)):
+    @router.post("/upload", response_model=UploadResponse, tags=["Ingestion"])
+    async def upload_file(
+        file: UploadFile = File(..., json_schema_extra={"format": "binary"}),
+    ):
         """
-        Upload a file (JSON, MD, or TXT) and ingest it into the vector store.
+        Upload a file (JSON, MD, TXT, or PDF) and ingest it into the vector store.
 
         The file is saved to a temporary location, ingested, then deleted.
         """
@@ -379,7 +385,7 @@ def create_router(
     # Document Management Endpoints
     # ------------------------------------------------------------------
 
-    @router.get("/documents", response_model=DocumentListResponse)
+    @router.get("/documents", response_model=DocumentListResponse, tags=["Documents"])
     def list_documents():
         """
         List all ingested documents with their metadata.
@@ -410,7 +416,7 @@ def create_router(
             logger.exception("Failed to list documents")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.get("/documents/{doc_id}", response_model=DocumentItem)
+    @router.get("/documents/{doc_id}", response_model=DocumentItem, tags=["Documents"])
     def get_document(doc_id: str):
         """
         Get metadata for a single ingested document.
@@ -439,7 +445,9 @@ def create_router(
             logger.exception("Failed to get document")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.delete("/documents/{doc_id}", response_model=DocumentDeleteResponse)
+    @router.delete(
+        "/documents/{doc_id}", response_model=DocumentDeleteResponse, tags=["Documents"]
+    )
     def delete_document(doc_id: str):
         """
         Delete an ingested document and all its chunks from the vector store.
@@ -482,7 +490,9 @@ def create_router(
     # Admin Endpoints
     # ------------------------------------------------------------------
 
-    @router.post("/admin/scheduler/run", response_model=SchedulerRunResponse)
+    @router.post(
+        "/admin/scheduler/run", response_model=SchedulerRunResponse, tags=["Admin"]
+    )
     def admin_scheduler_run():
         """
         Manually trigger the scheduler job.
@@ -498,7 +508,11 @@ def create_router(
             logger.exception("Manual scheduler run failed")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.get("/admin/scheduler/status", response_model=SchedulerStatusResponse)
+    @router.get(
+        "/admin/scheduler/status",
+        response_model=SchedulerStatusResponse,
+        tags=["Admin"],
+    )
     def admin_scheduler_status():
         """
         Get the status of the last scheduler fetch.
@@ -517,7 +531,9 @@ def create_router(
             logger.exception("Failed to read scheduler status")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.post("/admin/cache/clear", response_model=CacheClearResponse)
+    @router.post(
+        "/admin/cache/clear", response_model=CacheClearResponse, tags=["Admin"]
+    )
     def admin_cache_clear():
         """
         Clear all cache layers (embedding, LLM, and RAG).
@@ -547,7 +563,7 @@ def create_router(
             message=f"Cache cleared: {', '.join(cleared) if cleared else 'none'}",
         )
 
-    @router.get("/admin/stats", response_model=AdminStatsResponse)
+    @router.get("/admin/stats", response_model=AdminStatsResponse, tags=["Admin"])
     def admin_stats():
         """
         Get overall system statistics.
@@ -571,7 +587,7 @@ def create_router(
             cache_rag_size=cache_rag_size,
         )
 
-    @router.get("/admin/chunks", response_model=ChunkListResponse)
+    @router.get("/admin/chunks", response_model=ChunkListResponse, tags=["Admin"])
     def admin_list_chunks():
         """
         List all chunks in the vector store with their metadata.
@@ -592,7 +608,11 @@ def create_router(
             logger.exception("Failed to list chunks")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.delete("/admin/chunks/{chunk_id}", response_model=ChunkDeleteResponse)
+    @router.delete(
+        "/admin/chunks/{chunk_id}",
+        response_model=ChunkDeleteResponse,
+        tags=["Admin"],
+    )
     def admin_delete_chunk(chunk_id: str):
         """
         Delete a single chunk from the vector store by its ID.
@@ -610,7 +630,9 @@ def create_router(
     # Conversation Endpoints
     # ------------------------------------------------------------------
 
-    @router.get("/conversations", response_model=ConversationListResponse)
+    @router.get(
+        "/conversations", response_model=ConversationListResponse, tags=["Conversations"]
+    )
     def list_conversations(limit: int = 50, offset: int = 0):
         """
         List all conversations, most recent first.
@@ -647,7 +669,9 @@ def create_router(
             logger.exception("Failed to list conversations")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.get("/conversations/{conv_id}", response_model=ConversationItem)
+    @router.get(
+        "/conversations/{conv_id}", response_model=ConversationItem, tags=["Conversations"]
+    )
     def get_conversation(conv_id: str):
         """
         Get a single conversation with all its messages.
@@ -681,7 +705,12 @@ def create_router(
             logger.exception("Failed to get conversation")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.post("/conversations", response_model=ConversationItem, status_code=201)
+    @router.post(
+        "/conversations",
+        response_model=ConversationItem,
+        status_code=201,
+        tags=["Conversations"],
+    )
     def create_conversation(request: ConversationCreateRequest):
         """
         Create a new conversation.
@@ -728,7 +757,9 @@ def create_router(
             logger.exception("Failed to create conversation")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.put("/conversations/{conv_id}", response_model=ConversationItem)
+    @router.put(
+        "/conversations/{conv_id}", response_model=ConversationItem, tags=["Conversations"]
+    )
     def update_conversation(conv_id: str, request: ConversationUpdateRequest):
         """
         Update a conversation's title and/or messages.
@@ -777,7 +808,11 @@ def create_router(
             logger.exception("Failed to update conversation")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.delete("/conversations/{conv_id}", response_model=ConversationDeleteResponse)
+    @router.delete(
+        "/conversations/{conv_id}",
+        response_model=ConversationDeleteResponse,
+        tags=["Conversations"],
+    )
     def delete_conversation(conv_id: str):
         """
         Delete a conversation.
@@ -797,7 +832,7 @@ def create_router(
             logger.exception("Failed to delete conversation")
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.get("/metrics")
+    @router.get("/metrics", tags=["System"])
     def metrics():
         """
         Prometheus-style metrics endpoint.

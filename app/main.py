@@ -115,7 +115,22 @@ logging.getLogger(__name__).info(
 # FastAPI Application
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="AI RAG System", version="1.0.0")
+app = FastAPI(
+    title="AI RAG System",
+    version="1.0.0",
+    openapi_tags=[
+        {"name": "Chat", "description": "Ask questions over ingested documents."},
+        {"name": "Search", "description": "Raw vector search, no LLM call."},
+        {
+            "name": "Ingestion",
+            "description": "Ingest documents from a path or file upload.",
+        },
+        {"name": "Documents", "description": "Manage ingested document metadata."},
+        {"name": "Conversations", "description": "Manage saved chat conversations."},
+        {"name": "Admin", "description": "Scheduler, cache, stats and chunk admin."},
+        {"name": "System", "description": "Health and metrics."},
+    ],
+)
 
 # ---------------------------------------------------------------------------
 # CORS — allow frontend dev server
