@@ -59,7 +59,10 @@ function CodeBlock({
   };
 
   return (
-    <div className="group relative my-3 overflow-hidden rounded-xl border border-zinc-300 dark:border-zinc-600" dir="ltr">
+    <div
+      className="group relative my-3 overflow-hidden rounded-xl border border-zinc-300 dark:border-zinc-600"
+      dir="ltr"
+    >
       {/* header bar */}
       {match && (
         <div className="flex items-center justify-between bg-zinc-200 px-3 py-1.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
@@ -74,9 +77,7 @@ function CodeBlock({
         </div>
       )}
       <pre className="overflow-x-auto p-3 text-xs leading-relaxed">
-        <code className={className}>
-          {children}
-        </code>
+        <code className={className}>{children}</code>
       </pre>
     </div>
   );
@@ -95,10 +96,7 @@ function InlineCode(props: React.HTMLProps<HTMLElement>) {
 function Table(props: React.HTMLProps<HTMLTableElement>) {
   return (
     <div className="my-3 overflow-x-auto" dir="ltr">
-      <table
-        className="w-full border-collapse text-xs"
-        {...props}
-      />
+      <table className="w-full border-collapse text-xs" {...props} />
     </div>
   );
 }
@@ -133,7 +131,13 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
 
   const markdownComponents = useMemo(
     () => ({
-      code({ className, children }: { className?: string; children?: React.ReactNode }) {
+      code({
+        className,
+        children,
+      }: {
+        className?: string;
+        children?: React.ReactNode;
+      }) {
         const isInline = !className?.startsWith("language-");
         return isInline ? (
           <InlineCode className={className}>{children}</InlineCode>
@@ -209,25 +213,22 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
 
             {showSources && (
               <ul className="mt-2 space-y-2">
-                {message.sources!.map((src, i) => (
-                  <li
-                    key={i}
-                    className="rounded-lg border border-zinc-200 bg-white/60 p-2 text-xs dark:border-zinc-700 dark:bg-zinc-900/60"
-                  >
-                    <div className="flex items-center gap-1 text-zinc-400">
-                      <Star size={11} />
-                      <span>{(src.score * 100).toFixed(0)}%</span>
-                    </div>
-                    <p className="mt-1 leading-relaxed text-zinc-600 dark:text-zinc-300 line-clamp-3">
-                      {src.content}
-                    </p>
-                    {src.metadata?.title != null && typeof src.metadata.title === "string" && (
-                      <p className="mt-1 text-[10px] text-zinc-400">
-                        {src.metadata.title as string}
-                      </p>
-                    )}
-                  </li>
-                ))}
+                {message.sources!.map((src, i) => {
+                  console.log("src :>> ", src.metadata.ref);
+                  console.log("message.sources :>> ", message.sources);
+                  return (
+                    <li
+                      key={i}
+                      className="rounded-lg border border-zinc-200 bg-white/60 p-2 text-xs dark:border-zinc-700 dark:bg-zinc-900/60"
+                    >
+                      {src.metadata?.ref != null && (
+                        <p className="mt-1 text-[10px] text-zinc-400">
+                          [{i + 1}] - {src.metadata.ref as string}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

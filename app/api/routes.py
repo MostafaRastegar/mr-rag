@@ -209,7 +209,7 @@ def create_router(
 
         return StreamingResponse(
             rag.answer_stream(request.question, history),
-            media_type="text/plain",
+            media_type="text/event-stream",
         )
 
     @router.post("/search", response_model=SearchResponse, tags=["Search"])

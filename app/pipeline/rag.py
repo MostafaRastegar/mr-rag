@@ -27,6 +27,7 @@ from app.core.ports import (
     CachePort,
     EmbeddingPort,
     LLMPort,
+    RetrieverPort,
     RerankPort,
     VectorStorePort,
 )
@@ -38,26 +39,25 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT_STRICT = (
-    "You are a precise technical assistant that answers STRICTLY from the "
-    "provided context.\n\n"
+    "You are a precise assistant that answers STRICTLY from the provided "
+    "context.\n\n"
     "Rules you must follow:\n"
     "1. Answer only from the context. Never invent facts, numbers, or names.\n"
-    "2. Quote exact values verbatim — voltages, resistances, part numbers, "
-    "model numbers, temperatures, quantities, and units must be reproduced "
-    "exactly as written in the context.\n"
-    "3. Be specific and complete, never vague. Prefer concrete details "
-    "(numbers, component names, steps, conditions) over general statements. "
-    "Do not pad the answer with filler or generic commentary.\n"
-    "4. When the question asks how to do something or how to diagnose "
-    "something, give the steps in order.\n"
+    "2. Be specific and complete, never vague. Prefer concrete details over "
+    "general statements. Do not pad the answer with filler.\n"
+    "3. Answer in Persian (Farsi).\n"
+    "4. Organize the answer as a bulleted list: one claim per bullet, each "
+    "bullet starting with a short bolded title.\n"
     "5. Cite the source of each claim using the bracketed number of the "
-    "context passage, e.g. [1] or [2].\n"
-    "6. If the context only partially answers the question, answer the part "
-    "it does cover and explicitly state what is missing. Do not fill gaps "
-    "with assumptions.\n"
-    "7. If the context contains nothing relevant, say exactly: "
+    "context passage, e.g. [1] or [2], placed at the end of the bullet.\n"
+    "6. When the question asks how to do something, give the steps in order.\n"
+    "7. If the context only partially answers the question, answer the part "
+    "it covers and explicitly state what is missing. Do not fill gaps with "
+    "assumptions.\n"
+    "8. If the context contains nothing relevant, say exactly: "
     "\"The provided documents do not contain enough information to answer "
-    "this question.\""
+    "this question.\"\n"
+    "9. End with a one-sentence conclusion summarizing the overall picture."
 )
 
 SYSTEM_PROMPT_LOOSE = (
@@ -184,6 +184,21 @@ def _map_messages(formatted: list) -> list:
     return result
 
 
+def _source_label(metadata: dict | None) -> str | None:
+    """Build a human-readable source label from chunk metadata (same as routes)."""
+    if not metadata:
+        return None
+    name = metadata.get("original_filename") or metadata.get("source")
+    if not name:
+        return None
+    label = str(name).split("/")[-1]
+    if metadata.get("page") is not None:
+        label = f"{label}, p.{metadata['page']}"
+    elif metadata.get("section"):
+        label = f"{label} — {metadata['section']}"
+    return label
+
+
 # ---------------------------------------------------------------------------
 # Shared context for the RAG pipeline
 # ---------------------------------------------------------------------------
@@ -227,7 +242,7 @@ class RAGPipeline:
         vector_store: VectorStorePort,
         cache: CachePort | None = None,
         reranker: RerankPort | None = None,
-        retriever: "object | None" = None,
+        retriever: RetrieverPort | None = None,
     ) -> None:
         """
         Args:
@@ -306,28 +321,48 @@ class RAGPipeline:
         Answer a question using RAG with streaming response.
 
         Same three-stage cascading strategy as `answer()`, but yields
-        tokens progressively as they arrive from the LLM SSE stream.
+        SSE-formatted events:
+          - event: sources  (payload: list of source dicts, sent once)
+          - event: token    (payload: generated text chunk)
+          - event: done     (payload: empty, end of stream)
 
         Args:
             question: The user's question.
             history: Optional list of {role, content} dicts from previous turns.
 
         Yields:
-            Tokens of the generated answer as they become available.
+            SSE-formatted strings consumed by the frontend.
         """
         logger.info("Processing streaming question: %s", question[:100])
 
         ctx = self._prepare_rag(question, history)
         if ctx.is_fallback_answer:
-            yield ctx.fallback_answer_text
+            payload = json.dumps(
+                {"text": ctx.fallback_answer_text, "sources": []},
+                ensure_ascii=False,
+            )
+            yield f"event: done\ndata: {payload}\n\n"
             return
 
-        # Stream answer from LLM
+        # Emit retrieved sources first so the frontend can render the sources panel
+        sources_payload = [
+            {
+                "content": s.chunk.text[:200],
+                "metadata": s.chunk.metadata,
+                "score": s.score,
+                "source_name": _source_label(s.chunk.metadata),
+                "chunk_id": s.chunk.id or None,
+            }
+            for s in ctx.results
+        ]
+        yield f"event: sources\ndata: {json.dumps(sources_payload, ensure_ascii=False)}\n\n"
+
+        # Stream answer from LLM token by token
         try:
             answer_parts: List[str] = []
             async for token in self._llm.generate_stream(ctx.messages):
                 answer_parts.append(token)
-                yield token
+                yield f"event: token\ndata: {json.dumps(token, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error("LLM streaming failed: %s", str(e))
             raise RetrievalError(f"Failed to generate answer: {e}") from e
@@ -336,6 +371,8 @@ class RAGPipeline:
         full_answer = "".join(answer_parts)
         if full_answer:
             self._update_caches(question, ctx.query_embedding, full_answer)
+
+        yield "event: done\ndata: \n\n"
 
     # ------------------------------------------------------------------
     # Shared RAG preparation (common to both answer and answer_stream)

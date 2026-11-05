@@ -247,27 +247,35 @@ export default function ChatContainer() {
         .map((m) => ({ role: m.role, content: m.text }));
 
       let fullText = "";
-      let finalSources = undefined as Message["sources"];
+      let finalSources: Message["sources"] = [];
 
       try {
         const stream = chatStream(question, controller.signal, history);
 
-        for await (const token of stream) {
-          fullText += token;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, text: fullText } : m,
-            ),
-          );
+        for await (const event of stream) {
+          if (event.type === "sources") {
+            finalSources = event.sources ?? [];
+            continue;
+          }
+          if (event.type === "token") {
+            fullText += event.text ?? "";
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, text: fullText } : m,
+              ),
+            );
+            continue;
+          }
+          if (event.type === "done") {
+            break;
+          }
         }
 
-        // stream finished – fetch full response to get sources
-        const chatResp = await sendChat(question, history);
         const finalMsg: Message = {
           id: assistantId,
           role: "assistant",
-          text: chatResp.answer,
-          sources: chatResp.sources,
+          text: fullText,
+          sources: finalSources,
           streaming: false,
         };
 
@@ -286,6 +294,7 @@ export default function ChatContainer() {
         }
 
         if (fullText) {
+          // Best-effort: fetch sources from /chat if stream ended early
           try {
             const chatResp = await sendChat(question, history);
             finalSources = chatResp.sources;

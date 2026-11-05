@@ -7,7 +7,7 @@ on these abstractions, not on concrete implementations.
 """
 
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Protocol
 
 from app.core.domain import Chunk, Conversation, Document, DocumentInfo, Message, SearchResult
 
@@ -93,6 +93,24 @@ class VectorStorePort(ABC):
         Override in adapters that support listing all chunks.
         """
         return []
+
+
+class RetrieverPort(Protocol):
+    """Protocol for hybrid retrieval backends.
+
+    Exposes ``search(query, query_embedding, top_k, fetch_k)`` so the RAG
+    pipeline stays infrastructure-agnostic while still being able to call
+    the hybrid retriever (BM25 + dense) when configured.
+    """
+
+    def search(
+        self,
+        query: str,
+        query_embedding: List[float],
+        top_k: int,
+        fetch_k: int | None = None,
+    ) -> List[SearchResult]:
+        """Run a hybrid search and return fused results, best first."""
 
 
 class DocumentRepositoryPort(ABC):

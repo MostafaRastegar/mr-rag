@@ -27,6 +27,12 @@ export interface ChatResponse {
   sources: SourceItem[];
 }
 
+export interface StreamEvent {
+  type: "sources" | "token" | "done";
+  sources?: SourceItem[];
+  text?: string;
+}
+
 export interface HealthResponse {
   status: string;
   vector_store_count: number;
@@ -346,7 +352,7 @@ export async function* chatStream(
   question: string,
   signal?: AbortSignal,
   messages: ChatMessage[] = [],
-): AsyncGenerator<string> {
+): AsyncGenerator<StreamEvent> {
   const res = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -363,21 +369,52 @@ export async function* chatStream(
   if (!reader) throw new Error("No response body for stream");
 
   const decoder = new TextDecoder();
-  const buffer: string[] = [];
+  let buf = "";
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
-    const chunk = decoder.decode(value, { stream: true });
-    // The backend streams raw SSE text; each chunk may contain one or
-    // more data lines.  We forward them as-is for the UI to append.
-    buffer.push(chunk);
+    buf += decoder.decode(value, { stream: true });
 
-    // yield whatever we have so the UI stays responsive
-    for (const ch of buffer.splice(0)) {
-      yield ch;
+    // Split into complete SSE events (separated by blank lines).
+    const parts = buf.split("\n\n");
+    buf = parts.pop()!; // keep incomplete tail for next chunk
+
+    for (const part of parts) {
+      const event = parseSseEvent(part);
+      if (event) yield event;
     }
+  }
+
+  // Flush any remaining tail
+  if (buf.trim()) {
+    const event = parseSseEvent(buf);
+    if (event) yield event;
+  }
+}
+
+function parseSseEvent(block: string): StreamEvent | null {
+  let eventType = "";
+  const dataLines: string[] = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) {
+      eventType = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trim());
+    }
+  }
+  if (!eventType) return null;
+  const data = dataLines.join("\n");
+  switch (eventType) {
+    case "sources":
+      return { type: "sources", sources: JSON.parse(data) as SourceItem[] };
+    case "token":
+      return { type: "token", text: JSON.parse(data) as string };
+    case "done":
+      return { type: "done" };
+    default:
+      return null;
   }
 }
 
