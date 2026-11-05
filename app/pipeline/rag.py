@@ -55,8 +55,7 @@ SYSTEM_PROMPT_STRICT = (
     "it covers and explicitly state what is missing. Do not fill gaps with "
     "assumptions.\n"
     "8. If the context contains nothing relevant, say exactly: "
-    "\"The provided documents do not contain enough information to answer "
-    "this question.\"\n"
+    "\"بر اساس منابع موجود، به این سوال جوابی یافت نشد.\"\n"
     "9. End with a one-sentence conclusion summarizing the overall picture."
 )
 
@@ -305,7 +304,12 @@ class RAGPipeline:
             logger.error("LLM generation failed: %s", str(e))
             raise RetrievalError(f"Failed to generate answer: {e}") from e
 
-        answer = Answer(text=answer_text, sources=ctx.results)
+        # If the LLM found no relevant information, expose no sources.
+        no_info_msg = "بر اساس منابع موجود، به این سوال جوابی یافت نشد."
+        if answer_text.strip().startswith(no_info_msg):
+            answer = Answer(text=answer_text, sources=[])
+        else:
+            answer = Answer(text=answer_text, sources=ctx.results)
 
         # Store full answer in cache
         self._update_caches(question, ctx.query_embedding, answer_text)
@@ -341,25 +345,15 @@ class RAGPipeline:
                 {"text": ctx.fallback_answer_text, "sources": []},
                 ensure_ascii=False,
             )
+            yield f"event: sources\ndata: []\n\n"
             yield f"event: done\ndata: {payload}\n\n"
             return
 
-        # Emit retrieved sources first so the frontend can render the sources panel
-        sources_payload = [
-            {
-                "content": s.chunk.text[:200],
-                "metadata": s.chunk.metadata,
-                "score": s.score,
-                "source_name": _source_label(s.chunk.metadata),
-                "chunk_id": s.chunk.id or None,
-            }
-            for s in ctx.results
-        ]
-        yield f"event: sources\ndata: {json.dumps(sources_payload, ensure_ascii=False)}\n\n"
+        no_info_msg = "بر اساس منابع موجود، به این سوال جوابی یافت نشد."
 
         # Stream answer from LLM token by token
+        answer_parts: List[str] = []
         try:
-            answer_parts: List[str] = []
             async for token in self._llm.generate_stream(ctx.messages):
                 answer_parts.append(token)
                 yield f"event: token\ndata: {json.dumps(token, ensure_ascii=False)}\n\n"
@@ -367,16 +361,30 @@ class RAGPipeline:
             logger.error("LLM streaming failed: %s", str(e))
             raise RetrievalError(f"Failed to generate answer: {e}") from e
 
-        # Store full answer in cache
         full_answer = "".join(answer_parts)
+
+        # If the LLM found no relevant information, expose no sources.
+        if full_answer.strip().startswith(no_info_msg):
+            yield f"event: sources\ndata: []\n\n"
+        else:
+            sources_payload = [
+                {
+                    "content": s.chunk.text[:200],
+                    "metadata": s.chunk.metadata,
+                    "score": s.score,
+                    "source_name": _source_label(s.chunk.metadata),
+                    "chunk_id": s.chunk.id or None,
+                }
+                for s in ctx.results
+            ]
+            yield f"event: sources\ndata: {json.dumps(sources_payload, ensure_ascii=False)}\n\n"
+
+        # Store full answer in cache
         if full_answer:
             self._update_caches(question, ctx.query_embedding, full_answer)
 
         yield "event: done\ndata: \n\n"
 
-    # ------------------------------------------------------------------
-    # Shared RAG preparation (common to both answer and answer_stream)
-    # ------------------------------------------------------------------
 
     def _prepare_rag(self, question: str, history: List[Dict[str, str]] | None = None) -> _RAGContext:
         """

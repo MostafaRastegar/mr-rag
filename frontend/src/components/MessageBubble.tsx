@@ -109,7 +109,11 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
   const [showSources, setShowSources] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
-  const hasSources = !isUser && message.sources && message.sources.length > 0;
+  const hasSources =
+    !isUser &&
+    message.sources &&
+    message.sources.length > 0 &&
+    message.sources?.[0]?.metadata?.ref;
 
   const handleCopy = async () => {
     try {
