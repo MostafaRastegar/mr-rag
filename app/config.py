@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8080
 
+    # Confluence
+    confluence_timeout_seconds: int = 60
+    confluence_page_limit: int = 100
+    confluence_max_pages: int = 2000
+    confluence_embed_batch_size: int = 64
+    confluence_allowed_hosts: str = ""  # empty = no host restriction (log warning)
+
     # Chunking
     # Raised from 512 (the minimum acceptable value) because long Persian
     # sentences were being cut mid-thought, producing fragmented context.

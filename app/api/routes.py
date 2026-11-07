@@ -5,9 +5,12 @@ Thin layer: each handler validates the request, calls the appropriate
 pipeline, and returns a serialized response. No business logic here.
 """
 
+import json
 import logging
 import os
 import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -43,6 +46,19 @@ from app.api.schemas import (
     SearchResultItem,
     SourceItem,
     UploadResponse,
+    ConfluenceTestRequest,
+    ConfluenceTestResponse,
+    ConfluenceSpacesRequest,
+    ConfluenceSpacesResponse,
+    ConfluencePagesRequest,
+    ConfluencePagesResponse,
+    ConfluenceIndexRequest,
+    ConfluenceIndexResponse,
+    ConfluenceSyncRequest,
+    ConfluenceSyncResponse,
+    ConfluenceStatusResponse,
+    ConfluenceSpaceItem,
+    ConfluencePageItem,
 )
 from app.core.domain import Conversation, ConversationMessage
 from app.core.exceptions import (
@@ -60,9 +76,12 @@ from app.core.ports import (
     VectorStorePort,
 )
 from app.pipeline.ingestion import IngestionPipeline
+from app.pipeline.confluence_ingestion import ConfluenceIngestionService
 from app.pipeline.rag import RAGPipeline
 from app.scheduler.logger import read_last_fetch
 from app.scheduler.job import run_with_retry
+from app.infrastructure.confluence_client import ConfluenceClient, ConfluenceError
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +113,58 @@ def _source_label(metadata: dict | None) -> str | None:
     elif metadata.get("section"):
         label = f"{label} — {metadata['section']}"
     return label
+
+
+# ---------------------------------------------------------------------------
+# Confluence helpers
+# ---------------------------------------------------------------------------
+
+_CONFLUENCE_LOG_PATH = Path("data/confluence_sync_log.json")
+
+
+def _check_allowed_host(base_url: str) -> None:
+    """Reject Confluence hosts not in CONFLUENCE_ALLOWED_HOSTS (SSRF guard)."""
+    allowed = settings.confluence_allowed_hosts
+    if not allowed:
+        return
+    host = (urlparse(base_url).hostname or "").lower()
+    hosts = {h.strip().lower() for h in allowed.split(",") if h.strip()}
+    if host not in hosts:
+        raise HTTPException(
+            status_code=400, detail=f"Confluence host not allowed: {host}"
+        )
+
+
+def _make_client(request) -> ConfluenceClient:
+    return ConfluenceClient(
+        request.base_url,
+        auth_type=request.auth_type,
+        token=request.token,
+        email=request.email,
+        username=request.username,
+        timeout=settings.confluence_timeout_seconds,
+    )
+
+
+def _index_with_client(request, client: ConfluenceClient) -> ConfluenceIndexResponse:
+    service = ConfluenceIngestionService(
+        ingestion, vector_store, max_pages=settings.confluence_max_pages
+    )
+    result = service.index(
+        client=client,
+        mode=request.mode,
+        page_ids=request.page_ids,
+        space_key=request.space_key,
+        root_page_id=request.root_page_id,
+        recursive=request.recursive,
+    )
+    return ConfluenceIndexResponse(
+        status="success",
+        pages_indexed=result.pages_indexed,
+        pages_failed=result.pages_failed,
+        chunks_ingested=result.chunks_ingested,
+        errors=result.errors,
+    )
 
 
 def create_router(
@@ -158,6 +229,137 @@ def create_router(
         except Exception as e:
             logger.exception("Unexpected ingestion error")
             raise HTTPException(status_code=500, detail=f"Ingestion failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Confluence endpoints
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/confluence/test", response_model=ConfluenceTestResponse, tags=["Confluence"]
+    )
+    def confluence_test(request: ConfluenceTestRequest):
+        """Validate Confluence URL + credentials."""
+        _check_allowed_host(request.base_url)
+        try:
+            with _make_client(request) as client:
+                info = client.test_connection()
+                spaces = client.list_spaces(limit=1)
+            return ConfluenceTestResponse(
+                ok=True,
+                user=str(info.get("displayName") or info.get("username") or ""),
+                spaces_count=len(spaces),
+            )
+        except ConfluenceError as e:
+            logger.exception("Confluence test connection failed")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post(
+        "/confluence/spaces",
+        response_model=ConfluenceSpacesResponse,
+        tags=["Confluence"],
+    )
+    def confluence_spaces(request: ConfluenceSpacesRequest):
+        """List accessible Confluence spaces."""
+        _check_allowed_host(request.base_url)
+        try:
+            with _make_client(request) as client:
+                spaces = client.list_spaces(limit=request.limit)
+            return ConfluenceSpacesResponse(
+                spaces=[
+                    ConfluenceSpaceItem(
+                        key=str(s.get("key", "")), name=str(s.get("name", ""))
+                    )
+                    for s in spaces
+                ]
+            )
+        except ConfluenceError as e:
+            logger.exception("Confluence list spaces failed")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post(
+        "/confluence/pages",
+        response_model=ConfluencePagesResponse,
+        tags=["Confluence"],
+    )
+    def confluence_pages(request: ConfluencePagesRequest):
+        """List Confluence pages in a space or under a parent page."""
+        _check_allowed_host(request.base_url)
+        try:
+            with _make_client(request) as client:
+                data = client.list_pages(
+                    space_key=request.space_key,
+                    parent_page_id=request.parent_page_id,
+                    start=request.start,
+                    limit=request.limit,
+                )
+            base = request.base_url.rstrip("/")
+            pages = []
+            for p in data.get("results", []):
+                pid = str(p.get("id", ""))
+                pages.append(
+                    ConfluencePageItem(
+                        id=pid,
+                        title=str(p.get("title", "")),
+                        space_key=str((p.get("space") or {}).get("key", "")),
+                        url=f"{base}/pages/viewpage.action?pageId={pid}",
+                        version=str((p.get("version") or {}).get("number", "")) or None,
+                    )
+                )
+            return ConfluencePagesResponse(
+                pages=pages,
+                has_more=bool(data.get("_links", {}).get("next")),
+            )
+        except ConfluenceError as e:
+            logger.exception("Confluence list pages failed")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post(
+        "/confluence/index",
+        response_model=ConfluenceIndexResponse,
+        tags=["Confluence"],
+    )
+    def confluence_index(request: ConfluenceIndexRequest):
+        """Index Confluence pages (ids / space / subtree). Idempotent per page."""
+        _check_allowed_host(request.base_url)
+        try:
+            with _make_client(request) as client:
+                result = _index_with_client(request, client)
+            return result
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except ConfluenceError as e:
+            logger.exception("Confluence index failed")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post(
+        "/confluence/sync",
+        response_model=ConfluenceSyncResponse,
+        tags=["Confluence"],
+    )
+    def confluence_sync(request: ConfluenceSyncRequest):
+        """Re-index Confluence pages (same body as /index)."""
+        return confluence_index(request)
+
+    @router.get(
+        "/confluence/status", response_model=ConfluenceStatusResponse, tags=["Confluence"]
+    )
+    def confluence_status():
+        """Last Confluence sync status."""
+        if not _CONFLUENCE_LOG_PATH.exists():
+            return ConfluenceStatusResponse()
+        try:
+            entry = json.loads(_CONFLUENCE_LOG_PATH.read_text(encoding="utf-8"))
+            return ConfluenceStatusResponse(
+                last_sync=entry.get("last_sync"),
+                duration_seconds=entry.get("duration_seconds"),
+                pages_indexed=entry.get("pages_indexed"),
+                pages_failed=entry.get("pages_failed"),
+                chunks_ingested=entry.get("chunks_ingested"),
+                error=entry.get("error"),
+            )
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to read Confluence sync log: %s", e)
+            return ConfluenceStatusResponse()
 
     @router.post("/chat", response_model=ChatResponse, tags=["Chat"])
     def chat(request: ChatRequest):

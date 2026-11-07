@@ -10,6 +10,7 @@ import {
   Search,
   FileText,
   Activity,
+  Link,
 } from "lucide-react";
 
 /* آیکون‌های تزئینی lucide (R-39) */
@@ -25,6 +26,7 @@ import type { UploadResult } from "./FileUpload";
 import SearchPanel from "./SearchPanel";
 import DocumentsPanel from "./DocumentsPanel";
 import AdminPanel from "./AdminPanel";
+import ConfluencePanel from "./ConfluencePanel";
 import { sendChat, chatStream, getHealth } from "@/lib/api";
 import type { ChatMessage, HealthResponse } from "@/lib/api";
 import { getConversation, saveConversation } from "@/lib/db";
@@ -82,6 +84,7 @@ export default function ChatContainer() {
   const [showSearch, setShowSearch] = useState(false);
   const [showDocuments, setShowDocuments] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showConfluence, setShowConfluence] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const messagesRef = useRef(messages);
@@ -404,6 +407,9 @@ export default function ChatContainer() {
         <DocumentsPanel onClose={() => setShowDocuments(false)} />
       )}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+      {showConfluence && (
+        <ConfluencePanel onClose={() => setShowConfluence(false)} />
+      )}
 
       <div className="mx-auto flex h-dvh w-full max-w-3xl flex-col">
         {/* header */}
@@ -466,6 +472,17 @@ export default function ChatContainer() {
             >
               <HiddenIcon><Activity size={13} /></HiddenIcon>
               مدیریت
+            </button>
+
+            {/* confluence button */}
+            <button
+              onClick={() => setShowConfluence(true)}
+              className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              title="اتصال به کانفلوئنس"
+              aria-label="اتصال به کانفلوئنس"
+            >
+              <HiddenIcon><Link size={13} /></HiddenIcon>
+              کانفلوئنس
             </button>
 
             {/* health badge */}

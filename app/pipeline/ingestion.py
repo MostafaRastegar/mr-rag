@@ -47,6 +47,85 @@ class IngestionPipeline:
         self._vector_store = vector_store
         self._doc_repo = doc_repo
 
+    def run_documents(
+        self,
+        documents: List[Document],
+        original_filename: str | None = None,
+        source_path: str | None = None,
+    ) -> int:
+        """
+        Ingest already-loaded documents: split → embed → store → save metadata.
+
+        Args:
+            documents: Loaded documents to ingest.
+            original_filename: Logical origin name (used for delete-by-metadata).
+            source_path: Logical source path stored in chunk metadata.
+
+        Returns:
+            Number of chunks ingested.
+        """
+        if not documents:
+            logger.warning("No documents provided")
+            return 0
+        logger.info("Ingesting %d documents", len(documents))
+
+        # Step 1: Split into chunks
+        chunks: List[Chunk] = self._splitter.split(documents)
+        if not chunks:
+            logger.warning("No chunks generated from %d documents", len(documents))
+            return 0
+        logger.info("Split into %d chunks", len(chunks))
+
+        # Step 2: Generate embeddings
+        try:
+            texts = [chunk.text for chunk in chunks]
+            embeddings = self._embedding.embed_documents(texts)
+        except Exception as e:
+            logger.error("Embedding generation failed: %s", str(e))
+            raise IngestionError(f"Failed to generate embeddings: {e}") from e
+
+        if len(embeddings) != len(chunks):
+            raise IngestionError(
+                f"Embedding count mismatch: got {len(embeddings)} embeddings "
+                f"for {len(chunks)} chunks"
+            )
+
+        orig_name = original_filename or "documents"
+        src_path = source_path or orig_name
+        for chunk in chunks:
+            if "original_filename" not in chunk.metadata:
+                chunk.metadata["original_filename"] = orig_name
+            if "source_path" not in chunk.metadata:
+                chunk.metadata["source_path"] = str(src_path)
+
+        # Step 3: Store in vector store
+        try:
+            stored = self._vector_store.add(chunks, embeddings)
+        except Exception as e:
+            logger.error("Vector store insertion failed: %s", str(e))
+            raise IngestionError(f"Failed to store chunks: {e}") from e
+
+        logger.info("Ingestion complete: %d chunks stored", stored)
+
+        # Step 4: Save document metadata (optional)
+        if self._doc_repo is not None:
+            try:
+                doc_info = DocumentInfo(
+                    id=str(uuid.uuid4()),
+                    filename=Path(src_path).name or orig_name,
+                    original_filename=orig_name,
+                    source_path=str(src_path),
+                    file_type="confluence" if orig_name.startswith("confluence:") else "",
+                    chunk_count=stored,
+                    ingested_at=time.time(),
+                )
+                self._doc_repo.save(doc_info)
+                logger.info("Saved document metadata: %s (%s)", doc_info.id, doc_info.filename)
+            except Exception as e:
+                logger.warning("Failed to save document metadata: %s", e)
+
+        return stored
+
     def run(self, file_path: str, original_filename: str | None = None) -> int:
         """
         Ingest a file: load documents, split into chunks, embed, and store.
@@ -71,61 +150,4 @@ class IngestionPipeline:
             return 0
         logger.info("Loaded %d documents", len(documents))
 
-        # Step 2: Split into chunks
-        chunks: List[Chunk] = self._splitter.split(documents)
-        if not chunks:
-            logger.warning("No chunks generated from %d documents", len(documents))
-            return 0
-        logger.info("Split into %d chunks", len(chunks))
-
-        # Step 3: Generate embeddings
-        try:
-            texts = [chunk.text for chunk in chunks]
-            embeddings = self._embedding.embed_documents(texts)
-        except Exception as e:
-            logger.error("Embedding generation failed: %s", str(e))
-            raise IngestionError(f"Failed to generate embeddings: {e}") from e
-
-        if len(embeddings) != len(chunks):
-            raise IngestionError(
-                f"Embedding count mismatch: got {len(embeddings)} embeddings "
-                f"for {len(chunks)} chunks"
-            )
-
-        # Inject original_filename and source_path into every chunk's metadata
-        # so delete-by-metadata can match on the original name, not the temp name.
-        orig_name = original_filename or Path(file_path).name
-        for chunk in chunks:
-            if "original_filename" not in chunk.metadata:
-                chunk.metadata["original_filename"] = orig_name
-            if "source_path" not in chunk.metadata:
-                chunk.metadata["source_path"] = str(Path(file_path).resolve())
-
-        # Step 4: Store in vector store
-        try:
-            stored = self._vector_store.add(chunks, embeddings)
-        except Exception as e:
-            logger.error("Vector store insertion failed: %s", str(e))
-            raise IngestionError(f"Failed to store chunks: {e}") from e
-
-        logger.info("Ingestion complete: %d chunks stored", stored)
-
-        # Step 5: Save document metadata (optional)
-        if self._doc_repo is not None:
-            try:
-                path = Path(file_path)
-                doc_info = DocumentInfo(
-                    id=str(uuid.uuid4()),
-                    filename=path.name,
-                    original_filename=original_filename or path.name,
-                    source_path=str(path.resolve()),
-                    file_type=path.suffix.lower().lstrip("."),
-                    chunk_count=stored,
-                    ingested_at=time.time(),
-                )
-                self._doc_repo.save(doc_info)
-                logger.info("Saved document metadata: %s (%s)", doc_info.id, doc_info.filename)
-            except Exception as e:
-                logger.warning("Failed to save document metadata: %s", e)
-
-        return stored
+        return self.run_documents(documents, original_filename=original_filename, source_path=file_path)

@@ -31,6 +31,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    volumes:
+      - ./data:/app/data
     environment:
       # ChromaDB connection — use service name (DNS) inside the bridge network
       - CHROMA_HOST=chromadb
@@ -48,6 +50,7 @@ services:
       - CACHE_TYPE=${CACHE_TYPE:-memory}
       - CACHE_SEMANTIC_ENABLED=${CACHE_SEMANTIC_ENABLED:-true}
       - CACHE_SEMANTIC_THRESHOLD=${CACHE_SEMANTIC_THRESHOLD:-0.92}
+      - CONFLUENCE_ALLOWED_HOSTS=${CONFLUENCE_ALLOWED_HOSTS:-}
     depends_on:
       chromadb:
         condition: service_healthy
@@ -57,6 +60,40 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    networks:
+      - app_network
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Next.js Frontend
+  # ------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://localhost:8080
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - app_network
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # Mock Confluence (test data, --profile test)
+  # ------------------------------------------------------------------
+  confluence-mock:
+    profiles: ["test"]
+    build:
+      context: ./tests/fixtures/confluence_mock
+      dockerfile: Dockerfile
+    ports:
+      - "8091:8090"
+    environment:
+      - CONFLUENCE_MOCK_TOKEN=test-token
     networks:
       - app_network
     restart: unless-stopped

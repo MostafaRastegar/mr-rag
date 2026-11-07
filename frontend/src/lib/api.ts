@@ -483,3 +483,161 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   }
   return res.json();
 }
+
+/* ------------------------------------------------------------------ */
+/*  Confluence                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface ConfluenceCreds {
+  base_url: string;
+  auth_type: "bearer" | "basic";
+  token: string;
+  email?: string | null;
+  username?: string | null;
+}
+
+export interface ConfluenceTestResponse {
+  ok: boolean;
+  user: string | null;
+  spaces_count: number | null;
+}
+
+export interface ConfluenceSpaceItem {
+  key: string;
+  name: string;
+}
+
+export interface ConfluenceSpacesResponse {
+  spaces: ConfluenceSpaceItem[];
+}
+
+export interface ConfluencePageItem {
+  id: string;
+  title: string;
+  space_key: string;
+  url: string;
+  version: string | null;
+}
+
+export interface ConfluencePagesResponse {
+  pages: ConfluencePageItem[];
+  has_more: boolean;
+}
+
+export interface ConfluenceIndexRequest extends ConfluenceCreds {
+  mode: "ids" | "space" | "subtree";
+  page_ids?: string[] | null;
+  space_key?: string | null;
+  root_page_id?: string | null;
+  recursive?: boolean;
+}
+
+export interface ConfluenceIndexResponse {
+  status: string;
+  pages_indexed: number;
+  pages_failed: number;
+  chunks_ingested: number;
+  errors: { page_id: string; page_title: string; error: string }[];
+}
+
+export interface ConfluenceSyncRequest extends ConfluenceIndexRequest {}
+
+export interface ConfluenceSyncResponse extends ConfluenceIndexResponse {}
+
+export interface ConfluenceStatusResponse {
+  last_sync: number | null;
+  duration_seconds: number | null;
+  pages_indexed: number | null;
+  pages_failed: number | null;
+  chunks_ingested: number | null;
+  error: string | null;
+}
+
+export async function testConfluence(
+  creds: ConfluenceCreds,
+): Promise<ConfluenceTestResponse> {
+  const res = await fetch(`${API_BASE}/confluence/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(creds),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Confluence test failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
+export async function getConfluenceSpaces(
+  creds: ConfluenceCreds & { limit?: number },
+): Promise<ConfluenceSpacesResponse> {
+  const res = await fetch(`${API_BASE}/confluence/spaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(creds),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Confluence spaces failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
+export async function getConfluencePages(
+  creds: ConfluenceCreds & {
+    space_key?: string | null;
+    parent_page_id?: string | null;
+    start?: number;
+    limit?: number;
+  },
+): Promise<ConfluencePagesResponse> {
+  const res = await fetch(`${API_BASE}/confluence/pages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(creds),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Confluence pages failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
+export async function indexConfluence(
+  request: ConfluenceIndexRequest,
+): Promise<ConfluenceIndexResponse> {
+  const res = await fetch(`${API_BASE}/confluence/index`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Confluence index failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
+export async function syncConfluence(
+  request: ConfluenceSyncRequest,
+): Promise<ConfluenceSyncResponse> {
+  const res = await fetch(`${API_BASE}/confluence/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Confluence sync failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}
+
+export async function getConfluenceStatus(): Promise<ConfluenceStatusResponse> {
+  const res = await fetch(`${API_BASE}/confluence/status`);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Confluence status failed (${res.status}): ${err}`);
+  }
+  return res.json();
+}

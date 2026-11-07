@@ -117,8 +117,13 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
   const hasSources =
     !isUser &&
     !!message.sources &&
-    message.sources.length > 0 &&
-    message.sources[0]?.metadata?.ref != null;
+    message.sources.some(
+      (s) =>
+        s.metadata?.url ||
+        s.metadata?.original_filename ||
+        s.metadata?.page_title ||
+        s.metadata?.ref,
+    );
 
   const handleCopy = async () => {
     try {
@@ -229,11 +234,34 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
                       key={i}
                       className="rounded-lg border border-zinc-200 bg-white/60 p-2 text-xs dark:border-zinc-700 dark:bg-zinc-900/60"
                     >
-                      {src.metadata?.ref != null && (
+                      {(src.metadata?.url ||
+                        src.metadata?.original_filename ||
+                        src.metadata?.page_title ||
+                        src.metadata?.ref) ? (
                         <p className="mt-1 text-[10px] text-zinc-400">
-                          [{i + 1}] - {src.metadata.ref as string}
+                          [{i + 1}] -
+                          {src.metadata.url ? (
+                            <a
+                              href={String(src.metadata.url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 underline hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                              {String(
+                                src.metadata.page_title ||
+                                  src.metadata.original_filename ||
+                                  src.metadata.ref,
+                              )}
+                            </a>
+                          ) : (
+                            String(
+                              src.metadata.page_title ||
+                                src.metadata.original_filename ||
+                                src.metadata.ref,
+                            )
+                          )}
                         </p>
-                      )}
+                      ) : null}
                     </li>
                   );
                 })}

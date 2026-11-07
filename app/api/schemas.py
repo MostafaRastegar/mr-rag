@@ -266,3 +266,93 @@ class ConversationDeleteResponse(BaseModel):
 
     status: str
     deleted: bool
+
+
+# ---------------------------------------------------------------------------
+# Confluence
+# ---------------------------------------------------------------------------
+
+class ConfluenceCreds(BaseModel):
+    """User-supplied Confluence credentials (session-only, never stored)."""
+
+    base_url: str
+    auth_type: str = "bearer"  # "bearer" or "basic"
+    token: str
+    email: str | None = None
+    username: str | None = None
+
+
+class ConfluenceTestRequest(ConfluenceCreds):
+    pass
+
+
+class ConfluenceTestResponse(BaseModel):
+    ok: bool
+    user: str | None = None
+    spaces_count: int | None = None
+
+
+class ConfluenceSpacesRequest(ConfluenceCreds):
+    limit: int = 100
+
+
+class ConfluenceSpaceItem(BaseModel):
+    key: str
+    name: str
+
+
+class ConfluenceSpacesResponse(BaseModel):
+    spaces: list[ConfluenceSpaceItem]
+
+
+class ConfluencePagesRequest(ConfluenceCreds):
+    space_key: str | None = None
+    parent_page_id: str | None = None
+    start: int = 0
+    limit: int = 100
+
+
+class ConfluencePageItem(BaseModel):
+    id: str
+    title: str
+    space_key: str
+    url: str
+    version: str | None = None
+
+
+class ConfluencePagesResponse(BaseModel):
+    pages: list[ConfluencePageItem]
+    has_more: bool
+
+
+class ConfluenceIndexRequest(ConfluenceCreds):
+    mode: str  # "ids" | "space" | "subtree"
+    page_ids: list[str] | None = None
+    space_key: str | None = None
+    root_page_id: str | None = None
+    recursive: bool = False
+
+
+class ConfluenceIndexResponse(BaseModel):
+    status: str
+    pages_indexed: int
+    pages_failed: int
+    chunks_ingested: int
+    errors: list[dict] = []
+
+
+class ConfluenceSyncRequest(ConfluenceIndexRequest):
+    pass
+
+
+class ConfluenceSyncResponse(ConfluenceIndexResponse):
+    pass
+
+
+class ConfluenceStatusResponse(BaseModel):
+    last_sync: float | None = None
+    duration_seconds: float | None = None
+    pages_indexed: int | None = None
+    pages_failed: int | None = None
+    chunks_ingested: int | None = None
+    error: str | None = None
