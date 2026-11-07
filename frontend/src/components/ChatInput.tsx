@@ -45,7 +45,14 @@ export default function ChatInput({ onSend, disabled }: ChatInputProps) {
       dir="rtl"
       className="flex items-end gap-2 border-t border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900"
     >
+      <label
+        htmlFor="chat-input"
+        className="sr-only sm:sr-only"
+      >
+        سوال خود را بپرسید
+      </label>
       <textarea
+        id="chat-input"
         ref={textareaRef}
         value={value}
         onChange={(e) => {

@@ -2,6 +2,11 @@
 
 import { useState, useRef, type DragEvent, type ChangeEvent } from "react";
 import { Upload, File, X, Loader2, Check, AlertCircle } from "lucide-react";
+
+/* آیکون‌های تزئینی lucide (R-39) */
+const HiddenIcon = ({ children }: { children: React.ReactNode }) => (
+  <span aria-hidden="true">{children}</span>
+);
 import { uploadFile } from "@/lib/api";
 import type { UploadResponse } from "@/lib/api";
 
@@ -108,7 +113,7 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
             onClick={onClose}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
           >
-            <X size={16} />
+            <HiddenIcon><X size={16} /></HiddenIcon>
           </button>
         </div>
 
@@ -126,12 +131,14 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
                 : "border-zinc-300 hover:border-zinc-400 dark:border-zinc-600 dark:hover:border-zinc-500"
             }`}
           >
-            <Upload
-              size={32}
-              className={
-                status === "dragging" ? "text-blue-500" : "text-zinc-400"
-              }
-            />
+            <HiddenIcon>
+              <Upload
+                size={32}
+                className={
+                  status === "dragging" ? "text-blue-500" : "text-zinc-400"
+                }
+              />
+            </HiddenIcon>
             <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
               فایل را اینجا رها کنید یا کلیک کنید
             </p>
@@ -149,7 +156,7 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
         {/* selected file info */}
         {file && status !== "success" && (
           <div className="mt-3 flex items-center gap-2 rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-800">
-            <File size={16} className="shrink-0 text-blue-500" />
+            <HiddenIcon><File size={16} className="shrink-0 text-blue-500" /></HiddenIcon>
             <span className="flex-1 truncate font-medium text-zinc-700 dark:text-zinc-300">
               {file.name}
             </span>
@@ -190,12 +197,12 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
               >
                 {status === "uploading" ? (
                   <>
-                    <Loader2 size={16} className="animate-spin" />
+                    <HiddenIcon><Loader2 size={16} className="animate-spin" /></HiddenIcon>
                     در حال بارگذاری …
                   </>
                 ) : (
                   <>
-                    <Upload size={16} />
+                    <HiddenIcon><Upload size={16} /></HiddenIcon>
                     بارگذاری
                   </>
                 )}

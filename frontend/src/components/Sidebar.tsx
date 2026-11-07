@@ -9,6 +9,11 @@ import {
   PanelLeft,
   Clock,
 } from "lucide-react";
+
+/* آیکون‌های تزئینی lucide (R-39) */
+const HiddenIcon = ({ children }: { children: React.ReactNode }) => (
+  <span aria-hidden="true">{children}</span>
+);
 import type { Conversation } from "@/lib/db";
 import { getAllConversations, deleteConversation } from "@/lib/db";
 
@@ -79,7 +84,7 @@ export default function Sidebar({
         className="fixed right-2 top-3 z-50 flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
         title={open ? "بستن منو" : "نمایش تاریخچه"}
       >
-        {open ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+        {open ? <HiddenIcon><PanelLeftClose size={18} /></HiddenIcon> : <HiddenIcon><PanelLeft size={18} /></HiddenIcon>}
       </button>
 
       {/* overlay on mobile */}
@@ -105,8 +110,9 @@ export default function Sidebar({
           <button
             onClick={handleNew}
             className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+            aria-label="مکالمه جدید"
           >
-            <Plus size={14} />
+            <HiddenIcon><Plus size={14} /></HiddenIcon>
             جدید
           </button>
         </div>
@@ -129,13 +135,13 @@ export default function Sidebar({
                       : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
                   }`}
                 >
-                  <MessageSquare size={14} className="shrink-0 opacity-50" />
+                  <HiddenIcon><MessageSquare size={14} className="shrink-0 opacity-50" /></HiddenIcon>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">
                       {conv.title || "مکالمه جدید"}
                     </p>
                     <p className="mt-0.5 flex items-center gap-1 text-[10px] opacity-50">
-                      <Clock size={10} />
+                      <HiddenIcon><Clock size={10} /></HiddenIcon>
                       {formatDate(conv.updatedAt)}
                     </p>
                   </div>
@@ -144,7 +150,7 @@ export default function Sidebar({
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-500 group-hover:opacity-100"
                     title="حذف"
                   >
-                    <Trash2 size={13} />
+                    <HiddenIcon><Trash2 size={13} /></HiddenIcon>
                   </button>
                 </li>
               ))}

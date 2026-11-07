@@ -14,6 +14,11 @@ import {
   RefreshCw,
   Clock,
 } from "lucide-react";
+
+/* آیکون‌های تزئینی lucide (R-39) */
+const HiddenIcon = ({ children }: { children: React.ReactNode }) => (
+  <span aria-hidden="true">{children}</span>
+);
 import {
   getAdminStats,
   getSchedulerStatus,
@@ -120,14 +125,15 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
         {/* header */}
         <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-800 dark:text-zinc-200">
-            <Activity size={16} />
+            <HiddenIcon><Activity size={16} /></HiddenIcon>
             پنل مدیریت
           </h2>
           <button
             onClick={onClose}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+            aria-label="بستن پنل مدیریت"
           >
-            <X size={16} />
+            <HiddenIcon><X size={16} /></HiddenIcon>
           </button>
         </div>
 
@@ -152,43 +158,101 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
               {/* Stats cards */}
               <section>
                 <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                  <Database size={13} />
+                  <HiddenIcon><Database size={13} /></HiddenIcon>
                   آمار سیستم
                 </h3>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {(
                 [
-                  { label: "قطعات برداری", value: stats?.vector_store_count },
-                  { label: "اسناد", value: stats?.document_count },
+                  {
+                    label: "قطعات برداری",
+                    value: stats?.vector_store_count,
+                    variant: "blue", // R-14: cards vary by metric importance; vector store is primary
+                  },
+                  {
+                    label: "اسناد",
+                    value: stats?.document_count,
+                    variant: "green", // R-14: documents are secondary core metric
+                  },
                   {
                     label: "کش Embedding",
                     value: stats?.cache_embedding_size,
+                    variant: "amber", // R-14: cache metrics are tertiary
                   },
-                  { label: "کش LLM", value: stats?.cache_llm_size },
-                  { label: "کش RAG", value: stats?.cache_rag_size },
+                  {
+                    label: "کش LLM",
+                    value: stats?.cache_llm_size,
+                    variant: "purple", // R-14: cache metrics are tertiary
+                  },
+                  {
+                    label: "کش RAG",
+                    value: stats?.cache_rag_size,
+                    variant: "zinc", // R-14: cache metrics are tertiary
+                  },
                 ] as const
-                  ).map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex flex-col gap-1 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-800"
-                    >
-                      <span className="text-[10px] text-zinc-400">
-                        {item.label}
-                      </span>
-                      <span className="text-base font-bold text-zinc-800 dark:text-zinc-200">
-                        {item.value !== undefined && item.value >= 0
-                          ? item.value.toLocaleString("fa-IR")
-                          : "—"}
-                      </span>
-                    </div>
-                  ))}
+                  ).map((item, i) => {
+                    const variant = (() => {
+                      switch (item.variant) {
+                        case "blue":
+                          return {
+                            bg: "bg-blue-50",
+                            border: "border-blue-200",
+                            text: "text-blue-600",
+                            labelColor: "text-blue-500",
+                          };
+                        case "green":
+                          return {
+                            bg: "bg-green-50",
+                            border: "border-green-200",
+                            text: "text-green-600",
+                            labelColor: "text-green-500",
+                          };
+                        case "amber":
+                          return {
+                            bg: "bg-amber-50",
+                            border: "border-amber-200",
+                            text: "text-amber-600",
+                            labelColor: "text-amber-500",
+                          };
+                        case "purple":
+                          return {
+                            bg: "bg-purple-50",
+                            border: "border-purple-200",
+                            text: "text-purple-600",
+                            labelColor: "text-purple-500",
+                          };
+                        default:
+                          return {
+                            bg: "bg-zinc-50",
+                            border: "border-zinc-200",
+                            text: "text-zinc-600",
+                            labelColor: "text-zinc-500",
+                          };
+                      }
+                    })();
+                    return (
+                      <div
+                        key={i}
+                        className={`flex flex-col gap-1 rounded-xl border ${variant.border} ${variant.bg} p-3 dark:border-zinc-700 dark:bg-zinc-800`}
+                      >
+                        <span className={`text-[10px] ${variant.labelColor}`}>
+                          {item.label}
+                        </span>
+                        <span className={`text-base font-bold ${variant.text}`}>
+                          {item.value !== undefined && item.value >= 0
+                            ? item.value.toLocaleString("fa-IR")
+                            : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </section>
 
               {/* Scheduler */}
               <section>
                 <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                  <Clock size={13} />
+                  <HiddenIcon><Clock size={13} /></HiddenIcon>
                   اسکجولر
                 </h3>
                 <div className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-800">
@@ -231,9 +295,9 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                       className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
                     >
                       {schedulerRunning ? (
-                        <Loader2 size={13} className="animate-spin" />
+                        <HiddenIcon><Loader2 size={13} className="animate-spin" /></HiddenIcon>
                       ) : (
-                        <Play size={13} />
+                        <HiddenIcon><Play size={13} /></HiddenIcon>
                       )}
                       اجرای دستی
                     </button>
@@ -249,7 +313,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
               {/* Cache */}
               <section>
                 <h3 className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                  <Cpu size={13} />
+                  <HiddenIcon><Cpu size={13} /></HiddenIcon>
                   حافظه موقت (کش)
                 </h3>
                 <div className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-800">
@@ -259,15 +323,15 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                     className="flex items-center gap-1.5 rounded-lg bg-red-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
                   >
                     {cacheClearing ? (
-                      <Loader2 size={13} className="animate-spin" />
+                      <HiddenIcon><Loader2 size={13} className="animate-spin" /></HiddenIcon>
                     ) : (
-                      <Trash2 size={13} />
+                      <HiddenIcon><Trash2 size={13} /></HiddenIcon>
                     )}
                     پاکسازی همه کش‌ها
                   </button>
                   {cacheMsg && (
                     <div className="mt-2 flex items-center gap-1.5 text-[10px] text-green-600 dark:text-green-400">
-                      <Check size={11} />
+                      <HiddenIcon><Check size={11} /></HiddenIcon>
                       {cacheMsg}
                     </div>
                   )}
@@ -280,7 +344,7 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
                   onClick={load}
                   className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-600"
                 >
-                  <RefreshCw size={11} />
+                  <HiddenIcon><RefreshCw size={11} /></HiddenIcon>
                   به‌روزرسانی
                 </button>
               </div>

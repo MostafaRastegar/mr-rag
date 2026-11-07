@@ -8,10 +8,14 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
-  Star,
   Copy,
   Check,
 } from "lucide-react";
+
+/* آیکون‌های تزئینی lucide — accessible-name ندارند (R-39) */
+const HiddenIcon = ({ children }: { children: React.ReactNode }) => (
+  <span aria-hidden="true">{children}</span>
+);
 import type { SourceItem } from "@/lib/api";
 
 export interface Message {
@@ -71,7 +75,7 @@ function CodeBlock({
             onClick={handleCopy}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] opacity-0 transition-opacity hover:bg-zinc-300 group-hover:opacity-100 dark:hover:bg-zinc-600"
           >
-            {copied ? <Check size={11} /> : <Copy size={11} />}
+            <HiddenIcon>{copied ? <Check size={11} /> : <Copy size={11} />}</HiddenIcon>
             {copied ? "کپی شد" : "کپی"}
           </button>
         </div>
@@ -109,11 +113,12 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
   const [showSources, setShowSources] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
+  const hasText = message.text.length > 0;
   const hasSources =
     !isUser &&
-    message.sources &&
+    !!message.sources &&
     message.sources.length > 0 &&
-    message.sources?.[0]?.metadata?.ref;
+    message.sources[0]?.metadata?.ref != null;
 
   const handleCopy = async () => {
     try {
@@ -157,10 +162,10 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div dir="rtl" className="flex justify-start">
       <div
-        className={`group relative max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        className={`group relative max-w-[85%] px-4 py-3 text-sm leading-relaxed msg-enter ${
           isUser
-            ? "bg-blue-600 text-white"
-            : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+            ? "bg-blue-600 text-white rounded-2xl rounded-tr-[6px]"
+            : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100 rounded-2xl rounded-tl-[6px]"
         }`}
       >
         {/* role label */}
@@ -169,13 +174,14 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
         </p>
 
         {/* copy button — visible on hover for assistant messages */}
-        {!isUser && !message.streaming && message.text && (
+        {!isUser && !message.streaming && hasText && (
           <button
-            onClick={handleCopy}
+            onClick={() => void handleCopy()}
             className="absolute -left-10 top-3 flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-200 text-zinc-500 opacity-0 transition-opacity hover:bg-zinc-300 group-hover:opacity-100 dark:bg-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-600"
             title="کپی پاسخ"
+            aria-label="کپی پاسخ"
           >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
+            <HiddenIcon>{copied ? <Check size={14} /> : <Copy size={14} />}</HiddenIcon>
           </button>
         )}
 
@@ -195,7 +201,7 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
             "..."
           )}
           {message.streaming && (
-            <span className="inline-block h-3 w-1 animate-pulse bg-current" />
+            <span className="inline-block h-3 w-1 animate-pulse bg-current" aria-hidden="true" />
           )}
         </div>
 
@@ -206,20 +212,18 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
               onClick={() => setShowSources((v) => !v)}
               className="flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
             >
-              <FileText size={13} />
+              <HiddenIcon><FileText size={13} /></HiddenIcon>
               منابع ({message.sources!.length})
               {showSources ? (
-                <ChevronUp size={14} />
+                <HiddenIcon><ChevronUp size={14} /></HiddenIcon>
               ) : (
-                <ChevronDown size={14} />
+                <HiddenIcon><ChevronDown size={14} /></HiddenIcon>
               )}
             </button>
 
             {showSources && (
               <ul className="mt-2 space-y-2">
                 {message.sources!.map((src, i) => {
-                  console.log("src :>> ", src.metadata.ref);
-                  console.log("message.sources :>> ", message.sources);
                   return (
                     <li
                       key={i}

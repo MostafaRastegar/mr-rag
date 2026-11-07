@@ -23,6 +23,86 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/*  prefers-reduced-motion — تمام انیمیشن‌های غیرضرری متوقف شوند      */
+/*  (R-39)                                                            */
+/* ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin,
+  .animate-pulse {
+    animation: none !important;
+  }
+  .msg-enter {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  sr-only — label visibles برای Screen Readerها (R-39)                */
+/* ------------------------------------------------------------------ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  mr-rag visual identity palette (R-20 / Bowl 11)                   */
+/* ------------------------------------------------------------------ */
+:root {
+  --mr-accent: #2563eb;
+  --mr-accent-hover: #1d4ed8;
+  --mr-accent-subtle: #eff6ff;
+  --mr-success: #059669;
+  --mr-danger: #dc2626;
+  --mr-warning: #d97706;
+}
+
+.dark {
+  --mr-accent-subtle: #1e1b4b;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Focus indicators (R-39 / Bowl 17) — visible on keyboard focus     */
+/* ------------------------------------------------------------------ */
+:focus-visible {
+  outline: 2px solid var(--mr-accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Message entrance transition (R-19 / Bowl 15)                      */
+/* ------------------------------------------------------------------ */
+@keyframes msg-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.msg-enter {
+  animation: msg-enter 220ms ease-out forwards;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Typographic hierarchy helpers (R-06 / Bowl 16)                    */
+/* ------------------------------------------------------------------ */
+.text-lead {
+  font-size: 1.125rem;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.text-caption {
+  font-size: 0.875rem;
+  font-weight: 400;
+  opacity: 0.6;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Markdown body styles (for assistant messages)                      */
 /* ------------------------------------------------------------------ */
 

@@ -10,6 +10,11 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+
+/* آیکون‌های تزئینی lucide (R-39) */
+const HiddenIcon = ({ children }: { children: React.ReactNode }) => (
+  <span aria-hidden="true">{children}</span>
+);
 import { searchDocuments } from "@/lib/api";
 import type { SearchResultItem } from "@/lib/api";
 
@@ -69,14 +74,22 @@ export default function SearchPanel({ onClose }: SearchPanelProps) {
           <button
             onClick={onClose}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+            aria-label="بستن پنل جستجو"
           >
-            <X size={16} />
+            <HiddenIcon><X size={16} /></HiddenIcon>
           </button>
         </div>
 
         {/* search input */}
         <form onSubmit={handleSearch} className="flex gap-2 px-4 py-3">
+          <label
+            htmlFor="search-input"
+            className="sr-only sm:sr-only"
+          >
+            عبارت جستجو در اسناد
+          </label>
           <input
+            id="search-input"
             ref={inputRef}
             type="text"
             value={query}
@@ -91,9 +104,9 @@ export default function SearchPanel({ onClose }: SearchPanelProps) {
             className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
           >
             {status === "searching" ? (
-              <Loader2 size={16} className="animate-spin" />
+              <HiddenIcon><Loader2 size={16} className="animate-spin" /></HiddenIcon>
             ) : (
-              <Search size={16} />
+              <HiddenIcon><Search size={16} /></HiddenIcon>
             )}
             جستجو
           </button>
@@ -129,16 +142,18 @@ export default function SearchPanel({ onClose }: SearchPanelProps) {
                 >
                   {/* score badge */}
                   <div className="flex items-center gap-1.5">
-                    <Star
-                      size={12}
-                      className={
-                        item.score >= 0.7
-                          ? "text-green-500"
-                          : item.score >= minScore
-                            ? "text-yellow-500"
-                            : "text-zinc-300"
-                      }
-                    />
+                    <HiddenIcon>
+                      <Star
+                        size={12}
+                        className={
+                          item.score >= 0.7
+                            ? "text-green-500"
+                            : item.score >= minScore
+                              ? "text-yellow-500"
+                              : "text-zinc-300"
+                        }
+                      />
+                    </HiddenIcon>
                     <span
                       className={`font-medium ${
                         item.score >= 0.7
@@ -175,11 +190,11 @@ export default function SearchPanel({ onClose }: SearchPanelProps) {
                     >
                       {expanded ? (
                         <>
-                          کمتر <ChevronUp size={12} />
+                          کمتر <HiddenIcon><ChevronUp size={12} /></HiddenIcon>
                         </>
                       ) : (
                         <>
-                          بیشتر <ChevronDown size={12} />
+                          بیشتر <HiddenIcon><ChevronDown size={12} /></HiddenIcon>
                         </>
                       )}
                     </button>

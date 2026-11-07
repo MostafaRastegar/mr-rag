@@ -12,6 +12,11 @@ import {
   Database,
   RefreshCw,
 } from "lucide-react";
+
+/* آیکون‌های تزئینی lucide (R-39) */
+const HiddenIcon = ({ children }: { children: React.ReactNode }) => (
+  <span aria-hidden="true">{children}</span>
+);
 import { getDocuments, deleteDocument } from "@/lib/api";
 import type { DocumentItem, DocumentListResponse } from "@/lib/api";
 
@@ -98,14 +103,15 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
         {/* header */}
         <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <h2 className="flex items-center gap-2 text-sm font-bold text-zinc-800 dark:text-zinc-200">
-            <FileText size={16} />
+            <HiddenIcon><FileText size={16} /></HiddenIcon>
             مدیریت اسناد
           </h2>
           <button
             onClick={onClose}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+            aria-label="بستن پنل مدیریت اسناد"
           >
-            <X size={16} />
+            <HiddenIcon><X size={16} /></HiddenIcon>
           </button>
         </div>
 
@@ -122,7 +128,7 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
           {/* loading */}
           {status === "loading" && (
             <div className="flex items-center justify-center gap-2 py-12 text-sm text-zinc-400">
-              <Loader2 size={18} className="animate-spin" />
+              <HiddenIcon><Loader2 size={18} className="animate-spin" /></HiddenIcon>
               در حال دریافت اسناد …
             </div>
           )}
@@ -135,7 +141,7 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
                 onClick={load}
                 className="mt-3 flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white hover:bg-blue-700"
               >
-                <RefreshCw size={13} />
+                <HiddenIcon><RefreshCw size={13} /></HiddenIcon>
                 تلاش مجدد
               </button>
             </div>
@@ -144,7 +150,7 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
           {/* empty state */}
           {status === "loaded" && data && data.total === 0 && (
             <div className="flex flex-col items-center gap-2 py-12">
-              <Database size={32} className="text-zinc-300 dark:text-zinc-600" />
+              <HiddenIcon><Database size={32} className="text-zinc-300 dark:text-zinc-600" /></HiddenIcon>
               <p className="text-sm text-zinc-400">هیچ سندی یافت نشد</p>
             </div>
           )}
@@ -166,10 +172,12 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
                     >
                       {/* top row */}
                       <div className="flex items-center gap-2">
-                        <FileText
-                          size={14}
-                          className="shrink-0 text-blue-500"
-                        />
+                        <HiddenIcon>
+                          <FileText
+                            size={14}
+                            className="shrink-0 text-blue-500"
+                          />
+                        </HiddenIcon>
                         <span className="flex-1 truncate font-medium text-zinc-800 dark:text-zinc-200">
                           {doc.original_filename}
                         </span>
@@ -226,11 +234,11 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
                         >
                           {expanded ? (
                             <>
-                              کمتر <ChevronUp size={11} />
+                              کمتر <HiddenIcon><ChevronUp size={11} /></HiddenIcon>
                             </>
                           ) : (
                             <>
-                              جزئیات <ChevronDown size={11} />
+                              جزئیات <HiddenIcon><ChevronDown size={11} /></HiddenIcon>
                             </>
                           )}
                         </button>
@@ -241,9 +249,9 @@ export default function DocumentsPanel({ onClose }: DocumentsPanelProps) {
                           className="mr-auto flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-red-500 hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950"
                         >
                           {deletingId === doc.id ? (
-                            <Loader2 size={11} className="animate-spin" />
+                            <HiddenIcon><Loader2 size={11} className="animate-spin" /></HiddenIcon>
                           ) : (
-                            <Trash2 size={11} />
+                            <HiddenIcon><Trash2 size={11} /></HiddenIcon>
                           )}
                           حذف
                         </button>

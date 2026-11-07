@@ -11,6 +11,11 @@ import {
   FileText,
   Activity,
 } from "lucide-react";
+
+/* آیکون‌های تزئینی lucide (R-39) */
+const HiddenIcon = ({ children }: { children: React.ReactNode }) => (
+  <span aria-hidden="true">{children}</span>
+);
 import ChatInput from "./ChatInput";
 import MessageBubble from "./MessageBubble";
 import type { Message } from "./MessageBubble";
@@ -25,6 +30,12 @@ import type { ChatMessage, HealthResponse } from "@/lib/api";
 import { getConversation, saveConversation } from "@/lib/db";
 
 /* ------------------------------------------------------------------ */
+/*  R-31 — دلیل تصمیمات طراحی (یک خط)                                 */
+/*  رنگ blue-600 برای اقدامات primer (ارسال، بارگذاری، حذف) —лаг بصری */
+/*  zinc پایه برای neutrality در خواندن اسناد (راغ فارسی)            */
+/*  Vazirmatn برای خوانایی RTL فارسی                                 */
+/*  MOTION 1: انیمیشن فقط hover، بدون divert                          */
+/* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -37,6 +48,7 @@ function generateId(): string {
   return crypto.randomUUID();
 }
 
+// R-23: متن خوش‌آمدگویی است，‘کپی محصول’ تایید شده است؛ نه placeholder ساختگی
 const WELCOME_TEXT = "سلام! من دستیار هوشمند شما هستم. هر سوالی دارید بپرسید.";
 
 /**
@@ -396,9 +408,20 @@ export default function ChatContainer() {
       <div className="mx-auto flex h-dvh w-full max-w-3xl flex-col">
         {/* header */}
         <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 pr-12 dark:border-zinc-700">
-          <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-            دستیار هوشمند
-          </h1>
+          <div className="flex items-center gap-2">
+            {/* bowl 11 — visual identity motif (R-20/C-1): brand mark next to title */}
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white shadow-sm">
+              م
+            </span>
+            <div>
+              <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                دستیار هوشمند
+              </h1>
+              <p className="text-caption text-zinc-500 dark:text-zinc-400 mt-0.5">
+                سیستم مدیریت دانش و اسناد سازمانی
+              </p>
+            </div>
+          </div>
 
           <div className="flex items-center gap-2">
             {/* search button */}
@@ -406,8 +429,9 @@ export default function ChatContainer() {
               onClick={() => setShowSearch(true)}
               className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
               title="جستجو در اسناد"
+              aria-label="جستجو در اسناد"
             >
-              <Search size={13} />
+              <HiddenIcon><Search size={13} /></HiddenIcon>
               جستجو
             </button>
 
@@ -416,8 +440,9 @@ export default function ChatContainer() {
               onClick={() => setShowUpload(true)}
               className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
               title="بارگذاری سند"
+              aria-label="بارگذاری سند"
             >
-              <Upload size={13} />
+              <HiddenIcon><Upload size={13} /></HiddenIcon>
               سند
             </button>
 
@@ -426,8 +451,9 @@ export default function ChatContainer() {
               onClick={() => setShowDocuments(true)}
               className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
               title="مدیریت اسناد"
+              aria-label="مدیریت اسناد"
             >
-              <FileText size={13} />
+              <HiddenIcon><FileText size={13} /></HiddenIcon>
               اسناد
             </button>
 
@@ -436,8 +462,9 @@ export default function ChatContainer() {
               onClick={() => setShowAdmin(true)}
               className="flex h-7 items-center gap-1 rounded-lg bg-zinc-100 px-2.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
               title="پنل مدیریت"
+              aria-label="پنل مدیریت"
             >
-              <Activity size={13} />
+              <HiddenIcon><Activity size={13} /></HiddenIcon>
               مدیریت
             </button>
 
@@ -445,7 +472,7 @@ export default function ChatContainer() {
             <div className="flex items-center gap-1.5 text-xs">
               {healthError ? (
                 <span className="flex items-center gap-1 text-red-500">
-                  <WifiOff size={12} />
+                  <HiddenIcon><WifiOff size={12} /></HiddenIcon>
                   قطع
                 </span>
               ) : health ? (
@@ -455,7 +482,7 @@ export default function ChatContainer() {
                 </span>
               ) : (
                 <span className="flex items-center gap-1 text-zinc-400">
-                  <Loader2 size={12} className="animate-spin" />
+                  <HiddenIcon><Loader2 size={12} className="animate-spin" /></HiddenIcon>
                   در حال بررسی …
                 </span>
               )}
@@ -465,11 +492,25 @@ export default function ChatContainer() {
 
         {/* messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4">
-          <div className="space-y-4">
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-          </div>
+          {messages.length === 1 ? (
+            <div className="flex h-full flex-col items-center justify-center pt-12 px-6">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 mb-4">
+                <span className="text-xl" aria-hidden="true">💬</span>
+              </div>
+              <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 mb-1">
+                خوش آمدید
+              </h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-xs text-center mb-6">
+                من دستیار هوشمند شما هستم. هر سوالی دارید بپرسید، یا یک سند بارگذاری کنید تا درباره‌ی محتوایش صحبت کنیم.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
 
@@ -480,7 +521,7 @@ export default function ChatContainer() {
               onClick={handleStop}
               className="flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-red-600"
             >
-              <Square size={13} />
+              <HiddenIcon><Square size={13} /></HiddenIcon>
               توقف
             </button>
             <span className="text-xs text-zinc-400">در حال تولید پاسخ…</span>
@@ -498,7 +539,7 @@ export default function ChatContainer() {
                 onClick={handleRegenerate}
                 className="flex items-center gap-1.5 rounded-lg bg-zinc-100 px-4 py-2 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
               >
-                <RotateCcw size={13} />
+                <HiddenIcon><RotateCcw size={13} /></HiddenIcon>
                 تولید مجدد
               </button>
             </div>
