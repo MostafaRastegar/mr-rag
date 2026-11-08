@@ -31,6 +31,7 @@ from app.core.ports import (
     RerankPort,
     VectorStorePort,
 )
+from app.infrastructure.science_normalizer import process as _science_process
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,11 @@ SYSTEM_PROMPT_STRICT = (
     "assumptions.\n"
     "8. If the context contains nothing relevant, say exactly: "
     "\"بر اساس منابع موجود، به این سوال جوابی یافت نشد.\"\n"
-    "9. End with a one-sentence conclusion summarizing the overall picture."
+    "9. When the context or question contains math, chemistry, or biology "
+    "symbols (formulas, equations, Greek letters, DNA/RNA, ATP, etc.), "
+    "write them in LaTeX inline math using $...$ so the frontend can render "
+    "them correctly (e.g. $H_2O$, $x^2$, $∫x dx$).\n"
+    "10. End with a one-sentence conclusion summarizing the overall picture."
 )
 
 SYSTEM_PROMPT_LOOSE = (
@@ -300,6 +305,8 @@ class RAGPipeline:
         # Generate answer via blocking LLM call
         try:
             answer_text = self._llm.generate(ctx.messages)
+            if settings.science_detection_enabled:
+                answer_text = _science_process(answer_text)
         except Exception as e:
             logger.error("LLM generation failed: %s", str(e))
             raise RetrievalError(f"Failed to generate answer: {e}") from e
@@ -362,6 +369,8 @@ class RAGPipeline:
             raise RetrievalError(f"Failed to generate answer: {e}") from e
 
         full_answer = "".join(answer_parts)
+        if settings.science_detection_enabled:
+            full_answer = _science_process(full_answer)
 
         # If the LLM found no relevant information, expose no sources.
         if full_answer.strip().startswith(no_info_msg):
@@ -536,6 +545,8 @@ class RAGPipeline:
 
         # Build context from retrieved chunks (may be empty for Stage 3)
         context = self._build_context(results) if results else ""
+        if settings.science_detection_enabled:
+            context = _science_process(context)
 
         # Build history string for the prompt templates
         history_str = self._format_history(history or [])

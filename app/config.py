@@ -129,6 +129,12 @@ class Settings(BaseSettings):
     # knowledge when the context is insufficient.
     loose_prompt_enabled: bool = False
 
+    # Science / academic notation detection & formatting.
+    # When enabled, the pipeline normalizes math / chemistry / biology symbols
+    # in retrieved context and in the final answer (e.g. H2O → H₂O, x² → x²).
+    science_detection_enabled: bool = True
+    science_latex_output: bool = True  # emit LaTeX ($...$) for frontend rendering
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore",}
 
 
