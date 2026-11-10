@@ -72,35 +72,52 @@ class OpenRouterEmbedding(EmbeddingPort):
         return embedding
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """Generate embedding vectors for a list of text strings."""
+        """Generate embedding vectors for a list of text strings.
+
+        Splits large inputs into batches to respect the OpenRouter API
+        maximum batch size (256).  Results are concatenated in order.
+        """
         if not texts:
             return []
 
-        try:
-            response = httpx.post(
-                url=f"{self.base_url}/embeddings",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "input": texts,
-                },
-                timeout=360,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return [item["embedding"] for item in data["data"]]
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                "OpenRouter embedding API error: %s - %s",
-                e.response.status_code,
-                e.response.text,
-            )
-            raise EmbeddingError(
-                f"Embedding API returned {e.response.status_code}: {e.response.text}"
-            ) from e
-        except httpx.RequestError as e:
-            logger.error("OpenRouter embedding request failed: %s", str(e))
-            raise EmbeddingError(f"Embedding request failed: {e}") from e
+        batch_size = 256  # OpenRouter API hard limit
+        all_embeddings: List[List[float]] = []
+
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            try:
+                response = httpx.post(
+                    url=f"{self.base_url}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "input": batch,
+                    },
+                    timeout=360,
+                )
+                response.raise_for_status()
+                data = response.json()
+                batch_embeddings = [item["embedding"] for item in data["data"]]
+                if len(batch_embeddings) != len(batch):
+                    raise EmbeddingError(
+                        f"Embedding count mismatch: got {len(batch_embeddings)} "
+                        f"embeddings for {len(batch)} texts in batch {i // batch_size}"
+                    )
+                all_embeddings.extend(batch_embeddings)
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    "OpenRouter embedding API error: %s - %s",
+                    e.response.status_code,
+                    e.response.text,
+                )
+                raise EmbeddingError(
+                    f"Embedding API returned {e.response.status_code}: {e.response.text}"
+                ) from e
+            except httpx.RequestError as e:
+                logger.error("OpenRouter embedding request failed: %s", str(e))
+                raise EmbeddingError(f"Embedding request failed: {e}") from e
+
+        return all_embeddings
