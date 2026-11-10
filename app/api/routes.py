@@ -5,6 +5,7 @@ Thin layer: each handler validates the request, calls the appropriate
 pipeline, and returns a serialized response. No business logic here.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -551,10 +552,10 @@ def create_router(
         """
         # validate extension
         ext = os.path.splitext(file.filename or "")[1].lower()
-        if ext not in (".json", ".md", ".txt", ".pdf"):
+        if ext not in (".json", ".md", ".txt", ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".bmp"):
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type '{ext}'. Use .json, .md, or .txt",
+                detail=f"Unsupported file type '{ext}'. Use .json, .md, .txt, .pdf, or image files",
             )
 
         # save to temp file
@@ -566,7 +567,9 @@ def create_router(
             tmp.write(content)
             tmp.close()
 
-            chunks = ingestion.run(tmp.name, original_filename=file.filename or "unknown")
+            chunks = await asyncio.to_thread(
+                ingestion.run, tmp.name, original_filename=file.filename or "unknown"
+            )
             return UploadResponse(
                 status="success",
                 file_name=file.filename or "unknown",

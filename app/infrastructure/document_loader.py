@@ -13,6 +13,7 @@ from typing import Any, List
 
 from langchain_community.document_loaders import JSONLoader, TextLoader
 
+from app.config import settings
 from app.core.domain import Document
 from app.core.exceptions import DocumentLoadError
 from app.core.ports import DocumentLoaderPort
@@ -433,4 +434,25 @@ class AutoDocumentLoader(DocumentLoaderPort):
         logger.info(
             "Auto-detected format '%s' for %s", _SUPPORTED_EXTENSIONS[ext], file_path
         )
+
+        # For large PDFs, use parallel page extraction to avoid sequential
+        # bottlenecks that cause upload timeouts on hundred-page documents.
+        if ext == ".pdf" and isinstance(loader, PDFDocumentLoader):
+            try:
+                import fitz  # PyMuPDF
+
+                doc = fitz.open(file_path)
+                total_pages = len(doc)
+                doc.close()
+            except Exception:
+                total_pages = 0
+
+            if total_pages >= settings.pdf_parallel_min_pages:
+                logger.info(
+                    "PDF has %d pages (>= %d) — using parallel loader",
+                    total_pages,
+                    settings.pdf_parallel_min_pages,
+                )
+                return loader.load_parallel(file_path)
+
         return loader.load(file_path)

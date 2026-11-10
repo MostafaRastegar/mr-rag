@@ -24,6 +24,8 @@ class Chunk:
     text: str
     metadata: dict[str, Any] = field(default_factory=dict)
     id: str = ""
+    chunk_type: str = "text"  # "text" or "image"
+    image_ref: str | None = None  # reference to source image if chunk_type == "image"
 
 
 @dataclass

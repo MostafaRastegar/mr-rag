@@ -135,6 +135,45 @@ class Settings(BaseSettings):
     science_detection_enabled: bool = True
     science_latex_output: bool = True  # emit LaTeX ($...$) for frontend rendering
 
+    # Jev relevance reranker (TypeSafe via OpenRouter).
+    # When enabled, Jev re-scores retrieved chunks before they reach the LLM,
+    # improving precision without generating text.
+    jev_enabled: bool = True
+    jev_model: str = "typesafe/jev-1.13"
+    jev_provider: str = "openrouter"
+    jev_base_url: str = "https://openrouter.ai/api"
+    jev_question_mode: str = "noul"      # "noul" (yes/no probability) or "score" (0..3 rubric)
+    jev_scoring_mode: str = "per_chunk"  # "per_chunk" (accurate) or "batched" (faster, max 32)
+    jev_threshold: float = 0.5           # noul-mode cutoff (0..1)
+    jev_score_threshold: float = 2.0     # score-mode cutoff (0..3)
+    jev_max_concurrency: int = 8
+    jev_timeout_s: float = 30.0
+    jev_fail_open: bool = True           # return unfiltered candidates on failure
+
+    # Vision / Image understanding (VLM via OpenRouter)
+    # When enabled, images inside PDFs are described by a VLM and stored as chunks.
+    vision_enabled: bool = False
+    vision_model: str = "nvidia/nemotron-3.5-super-vl:free"
+    vision_base_url: str = "https://openrouter.ai/api/v1"
+    vision_timeout_s: float = 60.0
+    vision_max_images_per_page: int = 5
+    vision_description_language: str = "fa"
+    # Max concurrent VLM describe-image calls (keeps large PDF uploads from timing out).
+    vision_max_concurrency: int = 4
+    # Directory to persist extracted images (meaningful names) for debugging/reuse.
+    vision_extract_dir: str = "data/vision_extracts"
+
+    # Render PDF pages to images for VLM description (captures vector drawings / geometry).
+    vision_render_pages: bool = False
+    # DPI for page rendering (higher = better quality, larger images / more VLM cost).
+    vision_render_dpi: int = 150
+
+    # PDF loading performance
+    # Number of worker threads for parallel page extraction in load_parallel.
+    pdf_parallel_workers: int = 4
+    # Threshold: use parallel loading only when page count >= this value.
+    pdf_parallel_min_pages: int = 50
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore",}
 
 

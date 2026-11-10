@@ -61,7 +61,10 @@ SYSTEM_PROMPT_STRICT = (
     "symbols (formulas, equations, Greek letters, DNA/RNA, ATP, etc.), "
     "write them in LaTeX inline math using $...$ so the frontend can render "
     "them correctly (e.g. $H_2O$, $x^2$, $∫x dx$).\n"
-    "10. End with a one-sentence conclusion summarizing the overall picture."
+    "10. When the context contains image descriptions (from PDF figures, "
+    "diagrams, charts, or geometry shapes), treat them as first-class evidence. "
+    "Describe what the image shows and cite it using its bracketed number.\\n"
+    "11. End with a one-sentence conclusion summarizing the overall picture."
 )
 
 SYSTEM_PROMPT_LOOSE = (

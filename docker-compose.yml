@@ -87,9 +87,9 @@ services:
   # ------------------------------------------------------------------
   confluence-mock:
     profiles: ["test"]
-    build:
-      context: ./tests/fixtures/confluence_mock
-      dockerfile: Dockerfile
+    # build:
+      # context: ./tests/fixtures/confluence_mock
+      # dockerfile: Dockerfile
     ports:
       - "8091:8090"
     environment:

@@ -25,6 +25,8 @@ from app.infrastructure.document_repository import SQLiteDocumentRepository
 from app.infrastructure.hybrid_retriever import HybridRetriever
 from app.infrastructure.llm_reranker import LLMReranker
 from app.infrastructure.openrouter_embedding import OpenRouterEmbedding
+from app.infrastructure.jev_reranker import JevReranker
+from app.infrastructure.llm_reranker import LLMReranker
 from app.infrastructure.openrouter_llm import OpenRouterLLM
 from app.infrastructure.text_splitter import LangChainTextSplitter
 from app.pipeline.ingestion import IngestionPipeline
@@ -89,7 +91,10 @@ hybrid_retriever = HybridRetriever(
     vector_store=vector_store,
     bm25_weight=settings.hybrid_bm25_weight,
 )
-reranker = LLMReranker(llm=llm)
+if settings.jev_enabled:
+    reranker = JevReranker(enabled=True)
+else:
+    reranker = LLMReranker(llm=llm)
 
 rag_pipeline = RAGPipeline(
     embedding=embedding,
@@ -101,7 +106,7 @@ rag_pipeline = RAGPipeline(
 )
 logging.getLogger(__name__).info(
     "RAG pipeline ready (hybrid=%s bm25_weight=%.2f, rerank=%s top_n=%d, "
-    "fetch_k=%d, top_k=%d, min_score=%.2f)",
+    "fetch_k=%d, top_k=%d, min_score=%.2f, jev=%s jev_model=%s)",
     settings.hybrid_search_enabled,
     settings.hybrid_bm25_weight,
     settings.rerank_enabled,
@@ -109,6 +114,8 @@ logging.getLogger(__name__).info(
     settings.fetch_k,
     settings.top_k,
     settings.retrieval_min_score,
+    settings.jev_enabled,
+    settings.jev_model if settings.jev_enabled else "-",
 )
 
 # ---------------------------------------------------------------------------

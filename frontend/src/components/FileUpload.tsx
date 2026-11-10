@@ -31,7 +31,7 @@ interface FileUploadProps {
   onClose: () => void;
 }
 
-const ALLOWED_EXTENSIONS = [".json", ".md", ".txt", ".pdf"];
+const ALLOWED_EXTENSIONS = [".json", ".md", ".txt", ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".bmp"];
 
 export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
   const [status, setStatus] = useState<Status>("idle");
@@ -52,7 +52,7 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
       setStatus("idle");
       setErrorMsg("");
     } else {
-      setErrorMsg("فایل‌های JSON، MD یا TXT مجاز هستند");
+      setErrorMsg("فایل‌های JSON، MD، TXT، PDF یا تصویر مجاز هستند");
       setStatus("idle");
     }
   };
@@ -65,7 +65,7 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
         setStatus("idle");
         setErrorMsg("");
       } else {
-        setErrorMsg("فایل‌های JSON، MD یا TXT مجاز هستند");
+        setErrorMsg("فایل‌های JSON، MD، TXT، PDF یا تصویر مجاز هستند");
         setStatus("idle");
       }
     }
@@ -142,11 +142,11 @@ export default function FileUpload({ onSuccess, onClose }: FileUploadProps) {
             <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
               فایل را اینجا رها کنید یا کلیک کنید
             </p>
-            <p className="mt-1 text-[10px] text-zinc-400">JSON ‌• MD ‌• TXT • PDF</p>
+            <p className="mt-1 text-[10px] text-zinc-400">JSON • MD • TXT • PDF • تصویر</p>
             <input
               ref={inputRef}
               type="file"
-              accept=".json,.md,.txt,.pdf"
+              accept=".json,.md,.txt,.pdf,.jpg,.jpeg,.png,.webp,.bmp"
               className="hidden"
               onChange={handleSelect}
             />
